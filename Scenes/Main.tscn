@@ -1,0 +1,105 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://Scripts/BattleField.gd" id="1"]
+[ext_resource type="Script" path="res://Scripts/UILayer.gd" id="2"]
+
+[node name="Main" type="Node2D"]
+
+; === 戦場エリア（上部60% = 432px高さ, 横幅1280px） ===
+; 横スクロールの戦場。ユニットはここで戦う。
+[node name="BattleField" type="Node2D" parent="."]
+script = ExtResource("1")
+
+[node name="Camera2D" type="Camera2D" parent="BattleField"]
+position = Vector2(640, 360)
+current = true
+
+; 戦場の背景（ダークファンタジーの暗い紫色）
+[node name="Background" type="ColorRect" parent="BattleField"]
+offset_left = 0.0
+offset_top = 0.0
+offset_right = 1280.0
+offset_bottom = 432.0
+color = Color(0.12, 0.1, 0.18, 1)
+
+; 地面ライン（ユニットが歩く水平ライン・土色）
+[node name="GroundLine" type="ColorRect" parent="BattleField"]
+offset_left = 0.0
+offset_top = 380.0
+offset_right = 1280.0
+offset_bottom = 432.0
+color = Color(0.25, 0.2, 0.15, 1)
+
+; 自陣マーカー（左端の拠点・青色）
+[node name="PlayerBase" type="ColorRect" parent="BattleField"]
+offset_left = 0.0
+offset_top = 280.0
+offset_right = 50.0
+offset_bottom = 380.0
+color = Color(0.2, 0.5, 0.9, 0.8)
+
+; 敵陣マーカー（右端の拠点・赤色）
+[node name="EnemyBase" type="ColorRect" parent="BattleField"]
+offset_left = 1230.0
+offset_top = 280.0
+offset_right = 1280.0
+offset_bottom = 380.0
+color = Color(0.9, 0.2, 0.2, 0.8)
+
+; ユニットの親ノード（すべてのユニットはここに子として追加される）
+[node name="Units" type="Node2D" parent="BattleField"]
+
+; === UI領域（下部40% = 288px高さ） ===
+; カード手札、CDゲージ、デッキ情報などを配置する領域。
+[node name="UILayer" type="CanvasLayer" parent="."]
+layer = 10
+
+[node name="UIRoot" type="Control" parent="UILayer"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("2")
+
+; UI背景パネル（画面下部40%）
+[node name="UIBackground" type="ColorRect" parent="UILayer/UIRoot"]
+layout_mode = 1
+anchors_preset = -1
+anchor_top = 0.6
+anchor_right = 1.0
+anchor_bottom = 1.0
+color = Color(0.08, 0.07, 0.12, 0.95)
+
+; UI上部の区切りライン（ゴールドのアクセント）
+[node name="Separator" type="ColorRect" parent="UILayer/UIRoot"]
+layout_mode = 1
+anchors_preset = -1
+anchor_top = 0.597
+anchor_right = 1.0
+anchor_bottom = 0.603
+color = Color(0.6, 0.5, 0.3, 1)
+
+; 手札カードコンテナ（HBoxContainerで横並び）
+[node name="HandContainer" type="HBoxContainer" parent="UILayer/UIRoot"]
+layout_mode = 1
+anchors_preset = -1
+anchor_left = 0.05
+anchor_top = 0.63
+anchor_right = 0.95
+anchor_bottom = 0.92
+theme_override_constants/separation = 12
+alignment = 1
+
+; デバッグ用ステータスラベル
+[node name="DebugLabel" type="Label" parent="UILayer/UIRoot"]
+layout_mode = 1
+anchors_preset = -1
+anchor_left = 0.02
+anchor_top = 0.94
+anchor_right = 0.98
+anchor_bottom = 0.99
+text = "デッキ: -- | 捨て札: -- | ウェーブ: --"
+horizontal_alignment = 1
+vertical_alignment = 1
