@@ -147,38 +147,38 @@ func _show_empty() -> void:
 	if cd_overlay:
 		cd_overlay.visible = false
 
-# === CD進行状況を更新 ===
-# progress: 0.0=CD完了, 1.0=CDフル残り
-func update_cd(progress: float, remaining: float) -> void:
+# === フェーズ制での状態表示を更新 ===
+# cd_remaining: 残りCD時間, mana_cost: カードのマナコスト, charge_remaining: カードの残りチャージ数
+func update_cd_text(cd_remaining: float, mana_cost: int, charge_remaining: int) -> void:
 	if is_empty:
 		return
 	
 	if cd_label:
-		if remaining <= 0.1:
-			cd_label.text = "GO!"
-			cd_label.add_theme_color_override("font_color", Color(0.3, 1.0, 0.3))
+		if cd_remaining > 0.1:
+			cd_label.text = "CD: %.1f" % cd_remaining
+			cd_label.add_theme_color_override("font_color", Color(1.0, 0.5, 0.5))
+			cd_label.add_theme_font_size_override("font_size", 16)
 		else:
-			cd_label.text = "%.1f" % remaining
-			cd_label.add_theme_color_override("font_color", Color(1.0, 0.9, 0.5))
+			cd_label.text = "💎 %d" % mana_cost
+			cd_label.add_theme_color_override("font_color", Color(0.3, 0.8, 1.0))
+			cd_label.add_theme_font_size_override("font_size", 22)
 	
-	# CDオーバーレイの高さ = progress に比例
+	# CDオーバーレイ（CD中は暗くする）
 	if cd_overlay:
-		var card_height: float = size.y
-		cd_overlay.size = Vector2(size.x, card_height * progress)
-		cd_overlay.position = Vector2(0, 0)
-
-# === チャージ数の更新 ===
-func update_charge(remaining: int, max_charge: int) -> void:
-	if charge_label == null:
-		return
-	if max_charge <= 0:
-		# 無制限チャージ
-		charge_label.text = "∞"
-		charge_label.add_theme_color_override("font_color", Color(0.5, 0.8, 1.0))
-	else:
-		charge_label.text = "⭐ %d/%d" % [remaining, max_charge]
-		# 残り少ないと赤くなる
-		if remaining <= 1:
-			charge_label.add_theme_color_override("font_color", Color(1.0, 0.4, 0.4))
+		if cd_remaining > 0.0:
+			cd_overlay.size = size
+			cd_overlay.visible = true
 		else:
-			charge_label.add_theme_color_override("font_color", Color(0.5, 0.8, 1.0))
+			cd_overlay.visible = false
+	
+	# チャージ数の更新（使い切りは×を表示）
+	if charge_label:
+		if card_data.charge_count <= 0:
+			charge_label.text = "∞"
+		else:
+			charge_label.text = "⭐ %d/%d" % [charge_remaining, card_data.charge_count]
+			if charge_remaining <= 0:
+				charge_label.text = "✕"
+				charge_label.add_theme_color_override("font_color", Color(1.0, 0.3, 0.3))
+
+

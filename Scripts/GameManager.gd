@@ -42,6 +42,7 @@ func _generate_initial_deck() -> void:
         c.card_name = "巨盾兵"
         c.unit_role = CardData.UnitRole.TANK # 前衛の壁
         c.cooldown = 10.0    # 生産が超遅い（重量ユニット）
+        c.mana_cost = 4     # 重い！マナのほとんどを消費する
         c.charge_count = 2   # 2体しか出せないが、その分硬い
         c.unit_name = "巨盾兵"
         c.max_hp = 3000.0       # 超絶硬い (壁)
@@ -69,6 +70,7 @@ func _generate_initial_deck() -> void:
         c.card_name = "双剣兵"
         c.unit_role = CardData.UnitRole.FIGHTER # 中衛（前衛の後ろからラッシュ）
         c.cooldown = 4.0
+        c.mana_cost = 2      # 安い！複数並べやすい
         c.charge_count = 5   # 軽量ユニットなのでチャージ多め
         c.unit_name = "双剣兵"
         c.max_hp = 180.0        # スグ死ぬが前よりは耐える
@@ -91,6 +93,7 @@ func _generate_initial_deck() -> void:
         c.card_name = "長弓兵"
         c.unit_role = CardData.UnitRole.SHOOTER # ずっと後ろ
         c.cooldown = 8.0     # 生産が遅い（強力な遠距離）
+        c.mana_cost = 3      # 中コストのメインアタッカー
         c.charge_count = 3   # 3体まで
         c.unit_name = "長弓兵"
         c.max_hp = 150.0
@@ -118,6 +121,7 @@ func _generate_initial_deck() -> void:
         c.card_name = "狂気兵"
         c.unit_role = CardData.UnitRole.ASSAULT
         c.cooldown = 3.0     # 生産にも少し時間がかかるように
+        c.mana_cost = 1      # 最安！駄駒として繰り出せる
         c.charge_count = 8   
         c.unit_name = "狂気兵"
         c.max_hp = 1.0          # 触れられたら即死
@@ -138,6 +142,7 @@ func _generate_initial_deck() -> void:
     bomb.card_name = "爆弾兵"
     bomb.unit_role = CardData.UnitRole.ASSAULT # 自爆特攻
     bomb.cooldown = 12.0     # 重めのCD
+    bomb.mana_cost = 5       # マナを全て使い切る、一発逆転の切り札
     bomb.charge_count = 1    # たった1体だが特大爆発を持つ
     bomb.unit_name = "爆弾兵"
     bomb.max_hp = 150.0

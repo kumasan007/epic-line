@@ -95,12 +95,12 @@ func _ready() -> void:
 		
 	# --- 選択時専用の指揮UI（矢印ボタン）を作成 ---
 	_create_selection_ui()
+	
+	# === 実時間ウェーブ制：最初から時間は進み始める ===
+	# 時止めは廃止されました
 
 # === _processで演出処理を回す（ヒットストップ・カメラシェイク） ===
 func _process(delta: float) -> void:
-	# -- 時間停止処理 --
-	if is_time_stopped:
-		return
 		
 	# -- カメラシェイク処理 --
 	if camera_shake_timer > 0.0 and main_camera != null:
@@ -267,37 +267,126 @@ func get_alive_count_by_name(u_name: String) -> int:
 	return count
 
 
-# === デッキマネージャーの構築 ===
+# === デッキマネージャーの構築（リアルタイムサイクル制） ===
 func _setup_deck_manager() -> void:
 	deck_manager = DeckManager.new()
 	deck_manager.name = "DeckManager"
 	add_child(deck_manager)
 	
-	# CDが完了したカードからユニットを召喚するシグナルを接続
-	deck_manager.card_ready_to_summon.connect(_on_card_summon)
+	# サイクル終了時の一斉実体化
+	deck_manager.cycle_ended.connect(_on_cycle_ended)
+	# サイクル開始時に敵ゴーストを配置
+	deck_manager.cycle_started.connect(_on_cycle_started)
 	
-	# テスト用の初期デッキを作成
+	# デッキを初期化（全カードをスロットにセット）
 	var initial_deck: Array[CardData] = _create_test_deck()
 	deck_manager.initialize_deck(initial_deck)
 
-# === ウェーブマネージャーの構築 ===
+# === サイクル開始時：敵ゴーストを配置 ===
+func _on_cycle_started(cycle_number: int) -> void:
+	if battle_ended:
+		return
+	# サイクル番号に応じた敵の編成を取得し、ゴーストとして配置
+	var enemies_for_cycle: Array[Dictionary] = _get_enemies_for_cycle(cycle_number)
+	for enemy_stats in enemies_for_cycle:
+		var unit = spawn_unit(BaseUnit.Team.ENEMY, ENEMY_BASE_X, enemy_stats, true)
+		unit.enemy_base_x = PLAYER_BASE_X
+	print("[BattleField] サイクル%d: 敵%d体をゴースト配置" % [cycle_number, enemies_for_cycle.size()])
+
+# === サイクル番号に応じた敵の編成を返す ===
+func _get_enemies_for_cycle(cycle_number: int) -> Array[Dictionary]:
+	var enemies: Array[Dictionary] = []
+	
+	# 敵のテンプレート
+	var goblin = {
+		"unit_name": "狂速ゴブリン", "max_hp": 30.0, "atk": 5.0,
+		"attack_range": 30.0, "speed": 80.0, "attack_interval": 0.8,
+		"visual_size": 20.0, "unit_color": Color(0.2, 0.8, 0.2)
+	}
+	var skeleton = {
+		"unit_name": "骨の歩兵", "max_hp": 350.0, "atk": 12.0,
+		"attack_range": 40.0, "speed": 25.0, "attack_interval": 2.0,
+		"visual_size": 32.0, "unit_color": Color(0.8, 0.8, 0.85)
+	}
+	var skeleton_archer = {
+		"unit_name": "骨の弓兵", "max_hp": 120.0, "atk": 25.0,
+		"attack_range": 280.0, "speed": 20.0, "attack_interval": 3.0,
+		"visual_size": 28.0, "unit_color": Color(0.7, 0.7, 0.7),
+		"is_ranged": true, "projectile_aoe": 5.0, "projectile_speed": 400.0
+	}
+	var orc = {
+		"unit_name": "暴虐オーク", "max_hp": 1500.0, "atk": 50.0,
+		"attack_range": 45.0, "speed": 15.0, "attack_interval": 3.0, "defense": 5.0,
+		"knockback_chance": 100.0, "knockback_power": 60.0, "kb_resistance": 50.0,
+		"flinch_chance": 30.0, "flinch_duration": 0.5,
+		"visual_size": 65.0, "unit_color": Color(0.1, 0.4, 0.1)
+	}
+	var boss = {
+		"unit_name": "死の暴君(ボス)", "max_hp": 5000.0, "atk": 80.0,
+		"attack_range": 60.0, "speed": 12.0, "attack_interval": 4.0, "defense": 15.0,
+		"knockback_chance": 100.0, "knockback_power": 120.0, "kb_resistance": 100.0,
+		"flinch_chance": 80.0, "flinch_duration": 1.0,
+		"visual_size": 110.0, "unit_color": Color(0.3, 0.1, 0.5)
+	}
+	
+	# サイクル番号に応じて敵の編成をスケーリング（徐々に難しくなる）
+	match cycle_number:
+		1:
+			# サイクル1: ゴブリンが少しだけ
+			for i in range(3):
+				enemies.append(goblin.duplicate())
+		2:
+			# サイクル2: ゴブリン増加 + 骨兵登場
+			for i in range(5):
+				enemies.append(goblin.duplicate())
+			for i in range(2):
+				enemies.append(skeleton.duplicate())
+		3:
+			# サイクル3: 骨兵が主力 + 弓兵登場
+			for i in range(5):
+				enemies.append(skeleton.duplicate())
+			for i in range(2):
+				enemies.append(skeleton_archer.duplicate())
+		4:
+			# サイクル4: オーク登場
+			for i in range(3):
+				enemies.append(skeleton.duplicate())
+			for i in range(3):
+				enemies.append(skeleton_archer.duplicate())
+			enemies.append(orc.duplicate())
+		_:
+			# サイクル5以降: 難易度が上がり続ける
+			var extra = cycle_number - 4
+			for i in range(3 + extra):
+				enemies.append(skeleton.duplicate())
+			for i in range(2 + extra / 2):
+				enemies.append(skeleton_archer.duplicate())
+			if cycle_number % 3 == 0:
+				enemies.append(orc.duplicate())
+			if cycle_number >= 8:
+				enemies.append(boss.duplicate())
+	
+	return enemies
+func _on_cycle_ended() -> void:
+	var ghosts_count = 0
+	for child in units_container.get_children():
+		if child is BaseUnit and child.is_ghost:
+			child.materialize()
+			ghosts_count += 1
+	print("[BattleField] %d体の予約ユニットが一斉に実体化しました！" % ghosts_count)
+
+# === _on_phase_changed 等は廃止（削除） ===
+
+# === ウェーブマネージャーの構築（サイクル制では未使用だが、UI表示用に残す） ===
 func _setup_wave_manager() -> void:
 	wave_manager = WaveManager.new()
 	wave_manager.name = "WaveManager"
 	add_child(wave_manager)
 	
-	# 敵スポーンリクエストを受け取って実際に生成する
-	wave_manager.spawn_enemy_requested.connect(_on_enemy_spawn_requested)
-	# ウェーブ番号の変更をUIに通知
+	# サイクル制ではタイマーベースのスポーンはしない（_on_cycle_startedが担当）
+	# wave_changedだけUI表示用に接続
 	wave_manager.wave_changed.connect(_on_wave_changed)
-	# 全ウェーブ完了
 	wave_manager.all_waves_completed.connect(_on_all_waves_completed)
-	
-	# ウェーブデータの登録と開始
-	if wave_manager:
-		wave_manager.start_waves(WaveManager.get_waves_for_current_node())
-	
-	# --- ゲーム状態（HP等）の初期化 ---
 
 # === スペルマネージャーの構築 ===
 func _setup_spell_manager() -> void:
@@ -343,6 +432,8 @@ func _deferred_connect_ui() -> void:
 			ui_layer.connect_wave_manager(wave_manager)
 		if ui_layer.has_method("set_battlefield_ref"):
 			ui_layer.set_battlefield_ref(self)
+			# ここでUILayer側にも戦場の参照を渡すことで、全軍指揮ボタンが動作するようになる
+			ui_layer.battlefield_ref = self
 		print("[BattleField] UILayerとの接続完了")
 
 # === 全軍指揮（現在フィールドにいる味方に命令を出す単発トリガー） ===
@@ -387,48 +478,34 @@ func _create_test_deck() -> Array[CardData]:
 	print("[BattleField] フォールバック用デッキを作成しました。")
 	return deck
 
-# === CDが完了したカードからユニットを召喚する ===
-func _on_card_summon(card: CardData, _hand_index: int) -> void:
+# === UILayerから要求されたカードの発動・予約 ===
+func request_use_card(hand_index: int, target_pos_x: float) -> void:
 	if battle_ended:
 		return
-		
-	if card.is_curse:
-		print("[BattleField] 呪いカード '%s' が発動！ 拠点にダメージ！" % card.card_name)
-		player_hp = maxf(player_hp - card.atk, 0.0)
-		_update_base_hp_ui()
-		trigger_impact(0.01, 10.0, 0.3) # 呪いダメージで画面が少し揺れる
-		
-		var lbl = Label.new()
-		lbl.text = "呪いダメージ! -%d" % int(card.atk)
-		lbl.add_theme_font_size_override("font_size", 32)
-		lbl.add_theme_color_override("font_color", Color(0.8, 0.1, 0.4))
-		lbl.position = Vector2(PLAYER_BASE_X + 20, GROUND_Y - 100)
-		add_child(lbl)
-		var t = create_tween().set_parallel(true)
-		t.tween_property(lbl, "position:y", lbl.position.y - 50.0, 1.0)
-		t.tween_property(lbl, "modulate:a", 0.0, 1.0)
-		t.chain().tween_callback(lbl.queue_free)
-		
-		# 呪いはユニットを出さない
-		if player_hp <= 0.0:
-			_on_battle_defeat()
+	if deck_manager == null:
 		return
+	
+	var card: CardData = deck_manager.hand[hand_index]
+	
+	if deck_manager.try_use_card(hand_index):
+		if card.is_curse:
+			# 呪いカードの処理... 省略時はそのまま
+			return
+		
+		print("[BattleField] カード '%s' を位置 %.0f に予約！" % [card.card_name, target_pos_x])
+		var unit = spawn_unit(BaseUnit.Team.PLAYER, target_pos_x, card.get_unit_stats(), true)
+		# 自軍ユニットの拠点到達先 = 敵陣
+		unit.enemy_base_x = ENEMY_BASE_X
 
-	print("[BattleField] カード '%s' のCD完了 → ユニット召喚！" % card.card_name)
-	var unit = spawn_unit(BaseUnit.Team.PLAYER, PLAYER_BASE_X, card.get_unit_stats())
-	# 自軍ユニットの拠点到達先 = 敵陣
-	unit.enemy_base_x = ENEMY_BASE_X
-
-# === 敵スポーンリクエスト（ウェーブマネージャーから） ===
+# === 旧WaveManager用（サイクル制では未使用。_on_cycle_startedに移行済み） ===
 func _on_enemy_spawn_requested(enemy_stats: Dictionary) -> void:
 	if battle_ended:
 		return
-	var unit = spawn_unit(BaseUnit.Team.ENEMY, ENEMY_BASE_X, enemy_stats)
-	# 敵ユニットの拠点到達先 = 自陣
+	var unit = spawn_unit(BaseUnit.Team.ENEMY, ENEMY_BASE_X, enemy_stats, true)
 	unit.enemy_base_x = PLAYER_BASE_X
 
 # === ユニットを戦場に生成する汎用関数 ===
-func spawn_unit(team: BaseUnit.Team, spawn_x: float, stats: Dictionary = {}) -> BaseUnit:
+func spawn_unit(team: BaseUnit.Team, spawn_x: float, stats: Dictionary = {}, is_ghost: bool = false) -> BaseUnit:
 	var unit := BaseUnit.new()
 	unit.team = team
 	unit.battlefield_ref = self # BattleFieldの参照を持たせる（コマンド確認用）
@@ -469,6 +546,10 @@ func spawn_unit(team: BaseUnit.Team, spawn_x: float, stats: Dictionary = {}) -> 
 	# 戦場のUnitsノードに子として追加
 	units_container.add_child(unit)
 	
+	# ゴースト配置ならゴーストとしてセットアップ
+	if is_ghost:
+		unit.setup_as_ghost()
+		
 	# --- アーティファクトの効果適用 ---
 	if GameManager != null:
 		if team == BaseUnit.Team.PLAYER and "mask_of_swiftness" in GameManager.player_relics:
@@ -529,7 +610,7 @@ func _on_unit_died(unit: BaseUnit) -> void:
 			drop = 10
 			
 		earned_gold += drop
-		
+		# （旧システムの士気によるCD短縮ボーナスはリアルタイム制移行により廃止）
 		# 画面にゴールドポップアップを出す
 		var lbl = Label.new()
 		lbl.text = "+%d G" % drop
@@ -558,7 +639,7 @@ func _on_wave_changed(wave_num: int, total: int) -> void:
 	if main_node:
 		var ui_root = main_node.get_node_or_null("UILayer/UIRoot")
 		if ui_root and ui_root.has_method("_update_debug_info"):
-			# DeckManagerの枚数を取得
+			# 山札と捨て札の数をUIに渡す
 			var deck_size: int = deck_manager.draw_pile.size() if deck_manager else 0
 			var discard_size: int = deck_manager.discard_pile.size() if deck_manager else 0
 			ui_root._update_debug_info(deck_size, discard_size, wave_num)

@@ -58,11 +58,14 @@ var is_upgraded: bool = false # アップグレード済みフラグ
 
 # === 内部状態 ===
 var current_hp: float = 0.0       # 現在HP
-var is_alive: bool = true          # 生存フラグ
+var move_direction: float = 1.0    # 移動方向（1.0=右, -1.0=左）
 var current_target: BaseUnit = null # 現在の攻撃対象
 var attack_timer: float = 0.0      # 攻撃クールダウンタイマー
+var original_attack_interval: float = 1.0
+var battle_ended: bool = false
+var is_alive: bool = true          # 生存フラグ
+var is_ghost: bool = false        # ゴースト（出撃待機）状態フラグ
 var lifespan_timer: float = 0.0    # 寿命タイマー
-var move_direction: float = 1.0    # 移動方向（1.0=右, -1.0=左）
 var local_hit_stop_timer: float = 0.0 # 個別ヒットストップ（Stun/硬直）
 
 # 基準となるY座標（バトルフィールド側から渡される地面Y）
@@ -116,7 +119,7 @@ func _ready() -> void:
 	_create_highlight()
 
 func _process(delta: float) -> void:
-	if not is_alive:
+	if not is_alive or is_ghost:
 		return
 	
 	# --- 個別ヒットストップ（格ゲーの打撃停止） ---
@@ -134,9 +137,15 @@ func _process(delta: float) -> void:
 			return
 	
 	# --- ターゲット検索 ---
-	# 現在の攻撃対象が無効なら、新しいターゲットを探す
-	if current_target == null or not is_instance_valid(current_target) or not current_target.is_alive:
-		current_target = _find_nearest_enemy()
+	# 現在の攻撃対象が無効、あるいは射程外なら、より近いターゲットを探す
+	var dist_to_target = INF
+	if current_target != null and is_instance_valid(current_target) and current_target.is_alive:
+		dist_to_target = abs(current_target.position.x - position.x)
+	
+	if current_target == null or not is_instance_valid(current_target) or not current_target.is_alive or dist_to_target > attack_range:
+		var nearest = _find_nearest_enemy()
+		if nearest != null:
+			current_target = nearest
 	
 	# --- 行動決定：射程内なら攻撃、射程外なら前進 ---
 	if current_target != null and _is_in_range(current_target):
@@ -394,7 +403,7 @@ func _spawn_projectile() -> void:
 
 # === ダメージ受理 ===
 func take_damage(damage: float, source_unit = null, is_spell: bool = false) -> void:
-	if not is_alive:
+	if not is_alive or is_ghost:
 		return
 	
 	# 被弾時の個別ヒットストップ（食らい硬直）
@@ -783,3 +792,28 @@ func _flash_damage() -> void:
 		if is_instance_valid(sprite_rect):
 			sprite_rect.color = original_color
 	)
+
+# === ゴースト状態（出撃待機中）の設定 ===
+# ゴースト状態のユニットは半透明で表示され、一切行動しない（_processでreturn）
+# サイクル終了時にmaterialize()が呼ばれると、完全な状態で戦闘に参加する
+func setup_as_ghost() -> void:
+	is_ghost = true
+	modulate.a = 0.35  # 半透明にして「まだ本物じゃない」ことを示す
+	# HPバーを一時的に非表示に
+	if hp_bar_bg:
+		hp_bar_bg.visible = false
+	if hp_bar_fill:
+		hp_bar_fill.visible = false
+
+# === ゴーストから実体化する ===
+# サイクル終了時に呼ばれ、ユニットが完全に戦闘可能になる
+func materialize() -> void:
+	is_ghost = false
+	modulate.a = 1.0  # 完全に不透明に
+	# HPバーを再表示
+	if hp_bar_bg:
+		hp_bar_bg.visible = true
+	if hp_bar_fill:
+		hp_bar_fill.visible = true
+	# 実体化した時は常に前進状態にする（全軍突撃ボタンを廃止したため）
+	is_advancing = true

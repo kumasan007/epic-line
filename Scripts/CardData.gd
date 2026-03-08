@@ -12,8 +12,9 @@ class_name CardData
 # === CDとレベル ===
 # CD（クールダウン）= 手札に来てから召喚されるまでの待機時間
 # 企画書：CDの長さがコスト代替として機能する（強いユニット=CDが長い）
-@export var cooldown: float = 3.0
-@export var card_level: int = 1  # 通常版=1, アップグレード版=2
+@export var cooldown: float = 3.0      # CD（召喚後の再使用までの待機時間）
+@export var mana_cost: int = 3          # 召喚時に消費するマナ
+@export var card_level: int = 1         # 通常版=1, アップグレード版=2
 
 # === チャージ数（生産上限） ===
 # このカードが手札にある間に何体までユニットを生産できるか。
