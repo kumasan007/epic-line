@@ -15,6 +15,7 @@ var is_empty: bool = true
 var name_label: Label = null
 var cd_label: Label = null
 var stats_label: Label = null
+var charge_label: Label = null  # チャージ数表示
 var cd_overlay: ColorRect = null
 
 # === スタイル参照 ===
@@ -77,6 +78,13 @@ func _ready() -> void:
 	spacer2.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	vbox.add_child(spacer2)
 	
+	# チャージ数表示（下部）
+	charge_label = Label.new()
+	charge_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	charge_label.add_theme_font_size_override("font_size", 11)
+	charge_label.add_theme_color_override("font_color", Color(0.5, 0.8, 1.0))
+	vbox.add_child(charge_label)
+	
 	# CDオーバーレイ（上から縮んでいく半透明の矩形）
 	cd_overlay = ColorRect.new()
 	cd_overlay.color = Color(0.0, 0.0, 0.0, 0.5)
@@ -112,6 +120,9 @@ func set_card(data: CardData) -> void:
 		cd_label.visible = true
 	if cd_overlay:
 		cd_overlay.visible = true
+	if charge_label:
+		charge_label.visible = true
+		charge_label.text = ""
 
 # === スロットを空にする ===
 func clear_card() -> void:
@@ -130,6 +141,9 @@ func _show_empty() -> void:
 	if cd_label:
 		cd_label.text = ""
 		cd_label.visible = false
+	if charge_label:
+		charge_label.text = ""
+		charge_label.visible = false
 	if cd_overlay:
 		cd_overlay.visible = false
 
@@ -152,3 +166,19 @@ func update_cd(progress: float, remaining: float) -> void:
 		var card_height: float = size.y
 		cd_overlay.size = Vector2(size.x, card_height * progress)
 		cd_overlay.position = Vector2(0, 0)
+
+# === チャージ数の更新 ===
+func update_charge(remaining: int, max_charge: int) -> void:
+	if charge_label == null:
+		return
+	if max_charge <= 0:
+		# 無制限チャージ
+		charge_label.text = "∞"
+		charge_label.add_theme_color_override("font_color", Color(0.5, 0.8, 1.0))
+	else:
+		charge_label.text = "⭐ %d/%d" % [remaining, max_charge]
+		# 残り少ないと赤くなる
+		if remaining <= 1:
+			charge_label.add_theme_color_override("font_color", Color(1.0, 0.4, 0.4))
+		else:
+			charge_label.add_theme_color_override("font_color", Color(0.5, 0.8, 1.0))

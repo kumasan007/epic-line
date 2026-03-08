@@ -86,6 +86,12 @@ func start_waves(wave_data: Array[Dictionary]) -> void:
 		wave_changed.emit(1, waves.size())
 	print("[WaveManager] ウェーブ開始！ 全%dウェーブ" % waves.size())
 
+# === ウェーブの停止（戦闘終了時など） ===
+func stop_waves() -> void:
+	is_running = false
+	spawn_queue.clear()
+	print("[WaveManager] ウェーブを停止しました。")
+
 # === 指定ウェーブのスポーンキューを作成 ===
 func _start_wave(index: int) -> void:
 	var wave: Dictionary = waves[index]
@@ -102,78 +108,118 @@ func _start_wave(index: int) -> void:
 	
 	print("[WaveManager] ウェーブ %d 開始！ 敵グループ数: %d" % [index + 1, enemies.size()])
 
-# === テスト用のウェーブデータを生成する ===
-# なぜ静的関数？→ BattleFieldから呼び出して使うユーティリティ
-static func create_test_waves() -> Array[Dictionary]:
-	# 敵のステータス定義（使い回し用）
-	var goblin: Dictionary = {
-		# 特徴：速い！すぐ死ぬ！手数がスゲェ！
-		"unit_name": "狂速ゴブリン", "max_hp": 8.0, "atk": 5.0,
-		"attack_range": 30.0, "speed": 160.0, "attack_interval": 0.4
-	}
-	var skeleton: Dictionary = {
-		# 特徴：普通の兵士。少しタフ。
-		"unit_name": "骨の歩兵", "max_hp": 150.0, "atk": 12.0,
-		"attack_range": 40.0, "speed": 50.0, "attack_interval": 1.5
-	}
-	var skeleton_archer: Dictionary = {
-		# 特徴：遠くから撃ってくるが、もろい。
-		"unit_name": "骨の弓兵", "max_hp": 40.0, "atk": 25.0,
-		"attack_range": 220.0, "speed": 35.0, "attack_interval": 2.5
-	}
-	var orc: Dictionary = {
-		# 特徴：超絶硬い＆遅い。一撃がドスーン！と重い。
-		"unit_name": "暴虐オーク", "max_hp": 600.0, "atk": 50.0,
-		"attack_range": 45.0, "speed": 25.0, "attack_interval": 3.0, "defense": 5.0,
-		"knockback_chance": 100.0, "knockback_power": 60.0, "kb_resistance": 50.0
-	}
-	var dark_knight: Dictionary = {
-		# 特徴：全部盛りのボス
-		"unit_name": "死の暴君(ボス)", "max_hp": 1500.0, "atk": 80.0,
-		"attack_range": 50.0, "speed": 30.0, "attack_interval": 4.0, "defense": 15.0,
-		"knockback_chance": 100.0, "knockback_power": 120.0, "kb_resistance": 100.0
-	}
+# === UI表示用：次のウェーブの情報を取得 ===
+func get_next_wave_info() -> Dictionary:
+	if current_wave_index >= waves.size() or is_all_done:
+		return {"is_final": true}
+		
+	var next_wave = waves[current_wave_index]
+	var start_time = next_wave.get("start_time", 0.0)
+	var time_left = maxf(0.0, start_time - wave_timer)
 	
-	var waves: Array[Dictionary] = [
-		# ウェーブ1（0秒〜）: ゴブリン15体。最初の小手調べの大群
-		{
-			"start_time": 0.0,
-			"enemies": [
-				{"stats": goblin, "count": 15, "interval": 0.4}
-			]
+	# スポーン中なら残り0秒として扱う
+	if wave_timer >= start_time:
+		time_left = 0.0
+	
+	var enemy_summaries = []
+	for e in next_wave.get("enemies", []):
+		var u_name = e.get("stats", {}).get("unit_name", "???")
+		var count = e.get("count", 1)
+		enemy_summaries.append("%s x%d" % [u_name, count])
+		
+	return {
+		"is_final": false,
+		"time_left": time_left,
+		"wave_num": current_wave_index + 1,
+		"total_waves": waves.size(),
+		"enemies": enemy_summaries
+	}
+
+# === 現在のノードに応じたウェーブデータを生成する ===
+static func get_waves_for_current_node() -> Array[Dictionary]:
+	var node_type = "battle"
+	if GameManager != null and GameManager.map_nodes.size() > GameManager.current_node_index:
+		node_type = GameManager.map_nodes[GameManager.current_node_index]
+	
+	print("[WaveManager] ノードタイプ '%s' 用のウェーブを生成" % node_type)
+	
+	if node_type == "boss":
+		return _create_boss_waves()
+	elif node_type == "elite":
+		return _create_elite_waves()
+	else:
+		return _create_normal_waves()
+
+# 以下、遭遇タイプごとのウェーブ定義（プライベート）
+static func _get_enemy_dict() -> Dictionary:
+	return {
+		"goblin": {
+			"unit_name": "狂速ゴブリン", "max_hp": 30.0, "atk": 5.0,
+			"attack_range": 30.0, "speed": 80.0, "attack_interval": 0.8,
+			"visual_size": 20.0, "unit_color": Color(0.2, 0.8, 0.2)
 		},
-		# ウェーブ2（8秒〜）: スケルトン20体。盾兵がいないと少し辛い
-		{
-			"start_time": 8.0,
-			"enemies": [
-				{"stats": skeleton, "count": 20, "interval": 0.5}
-			]
+		"skeleton": {
+			"unit_name": "骨の歩兵", "max_hp": 350.0, "atk": 12.0,
+			"attack_range": 40.0, "speed": 25.0, "attack_interval": 2.0,
+			"visual_size": 32.0, "unit_color": Color(0.8, 0.8, 0.85)
 		},
-		# ウェーブ3（18秒〜）: 混成部隊。骨15体+遠距離10体。
-		{
-			"start_time": 18.0,
-			"enemies": [
-				{"stats": skeleton, "count": 15, "interval": 0.4},
-				{"stats": skeleton_archer, "count": 10, "interval": 0.6}
-			]
+		"skeleton_archer": {
+			"unit_name": "骨の弓兵", "max_hp": 120.0, "atk": 25.0,
+			"attack_range": 280.0, "speed": 20.0, "attack_interval": 3.0,
+			"visual_size": 28.0, "unit_color": Color(0.7, 0.7, 0.7),
+			"is_ranged": true, "projectile_aoe": 5.0, "projectile_speed": 400.0
 		},
-		# ウェーブ4（30秒〜）: 怒涛のゴブリンラッシュ 60体 + 超巨大オーク5体。範囲攻撃スペルが無いと死ぬ
-		{
-			"start_time": 30.0,
-			"enemies": [
-				{"stats": orc, "count": 5, "interval": 1.5},
-				{"stats": goblin, "count": 60, "interval": 0.15}
-			]
+		"orc": {
+			"unit_name": "暴虐オーク", "max_hp": 1500.0, "atk": 50.0,
+			"attack_range": 45.0, "speed": 15.0, "attack_interval": 3.0, "defense": 5.0,
+			"knockback_chance": 100.0, "knockback_power": 60.0, "kb_resistance": 50.0,
+			"flinch_chance": 30.0, "flinch_duration": 0.5,
+			"visual_size": 65.0, "unit_color": Color(0.1, 0.4, 0.1)
 		},
-		# ウェーブ5（45秒〜）: ボス級。ダークナイト + 護衛の群れ
-		{
-			"start_time": 45.0,
-			"enemies": [
-				{"stats": skeleton, "count": 25, "interval": 0.3},
-				{"stats": skeleton_archer, "count": 15, "interval": 0.5},
-				{"stats": dark_knight, "count": 1, "interval": 0.0}
-			]
-		},
+		"dark_knight": {
+			"unit_name": "死の暴君(ボス)", "max_hp": 5000.0, "atk": 80.0,
+			"attack_range": 60.0, "speed": 12.0, "attack_interval": 4.0, "defense": 15.0,
+			"knockback_chance": 100.0, "knockback_power": 120.0, "kb_resistance": 100.0,
+			"flinch_chance": 80.0, "flinch_duration": 1.0,
+			"visual_size": 110.0, "unit_color": Color(0.3, 0.1, 0.5)
+		}
+	}
+
+static func _create_normal_waves() -> Array[Dictionary]:
+	var e = _get_enemy_dict()
+	return [
+		{ "start_time": 0.0, "enemies": [ {"stats": e.goblin, "count": 5, "interval": 1.5} ] },
+		{ "start_time": 15.0, "enemies": [ {"stats": e.skeleton, "count": 10, "interval": 2.0} ] },
+		{ "start_time": 35.0, "enemies": [ 
+			{"stats": e.skeleton, "count": 8, "interval": 2.0},
+			{"stats": e.skeleton_archer, "count": 4, "interval": 3.0} 
+		] }
 	]
-	
-	return waves
+
+static func _create_elite_waves() -> Array[Dictionary]:
+	var e = _get_enemy_dict()
+	return [
+		{ "start_time": 0.0, "enemies": [ {"stats": e.goblin, "count": 10, "interval": 1.0} ] },
+		{ "start_time": 15.0, "enemies": [ 
+			{"stats": e.orc, "count": 3, "interval": 5.0},
+			{"stats": e.skeleton_archer, "count": 6, "interval": 2.0} 
+		] },
+		{ "start_time": 40.0, "enemies": [ {"stats": e.skeleton, "count": 20, "interval": 1.5} ] }
+	]
+
+static func _create_boss_waves() -> Array[Dictionary]:
+	var e = _get_enemy_dict()
+	return [
+		{ "start_time": 0.0, "enemies": [ 
+			{"stats": e.skeleton, "count": 10, "interval": 1.5},
+			{"stats": e.skeleton_archer, "count": 5, "interval": 2.5} 
+		] },
+		{ "start_time": 30.0, "enemies": [ 
+			{"stats": e.orc, "count": 4, "interval": 4.0},
+			{"stats": e.goblin, "count": 15, "interval": 0.8} 
+		] },
+		{ "start_time": 60.0, "enemies": [ 
+			{"stats": e.dark_knight, "count": 1, "interval": 0.0},
+			{"stats": e.skeleton, "count": 10, "interval": 3.0}
+		] }
+	]

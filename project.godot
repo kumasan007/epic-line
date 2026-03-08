@@ -11,7 +11,7 @@ config_version=5
 [application]
 
 config/name="Epic Line"
-run/main_scene="res://Scenes/Main.tscn"
+run/main_scene="res://Scenes/TitleScreen.tscn"
 config/features=PackedStringArray("4.6", "GL Compatibility")
 config/icon="res://icon.svg"
 
@@ -31,3 +31,7 @@ window/handheld/orientation=0
 rendering_device/driver.windows="d3d12"
 renderer/rendering_method="gl_compatibility"
 renderer/rendering_method.mobile="gl_compatibility"
+
+[autoload]
+
+GameManager="*res://Scripts/GameManager.gd"

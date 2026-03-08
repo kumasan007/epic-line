@@ -19,12 +19,18 @@ enum Team { PLAYER, ENEMY }
 @export var team: Team = Team.PLAYER
 @export var max_hp: float = 100.0         # 最大HP
 @export var atk: float = 10.0             # 攻撃力
-@export var attack_range: float = 50.0    # 射程距離（ピクセル）
-@export var defense: float = 0.0          # 防御力
-@export var speed: float = 80.0           # 移動速度（px/秒）
 @export var cooldown: float = 3.0         # 召喚CD（カードシステム用、ユニット自体では使わない）
-@export var lifespan: float = 0.0         # 寿命（秒）。0=無限
-@export var attack_interval: float = 1.0  # 攻撃間隔（秒）
+# ステータス関連
+var attack_range: float = 40.0
+var defense: float = 0.0
+var speed: float = 80.0
+var attack_interval: float = 1.0     # 何秒に1回攻撃するか
+var attack_windup_time: float = -1.0 # 攻撃モーションのタメ時間
+var lifespan: float = 0.0            # >0 なら一定時間で死亡する
+var is_ranged: bool = false
+var projectile_speed: float = 300.0
+var projectile_color: Color = Color.WHITE
+var projectile_aoe: float = 0.0 # 着弾後の爆発範囲
 
 # ユニットのロール（BattleFieldからの指示で行動を変える）
 var unit_role: int = 0  # CardData.UnitRole.FIGHTER と同じ意味(デフォルト=2)
@@ -32,12 +38,23 @@ var unit_role: int = 0  # CardData.UnitRole.FIGHTER と同じ意味(デフォル
 # ノックバック関連
 @export var knockback_chance: float = 0.0   # 吹き飛ばし確率(%)
 @export var knockback_power: float = 0.0    # 吹き飛ばし力
+@export var knockback_direction: Vector2 = Vector2(1.0, -0.5) # x=水平, y=垂直
 @export var kb_resistance: float = 0.0      # ノックバック耐性(%)
 
+# ひるみ（Flinch/Stun）関連
+@export var flinch_chance: float = 0.0      # ひるみ確率(%)
+@export var flinch_duration: float = 0.0    # ひるみ秒数
+
 # 死亡時効果
-@export var death_effect_type: String = ""  # 例: "explosion"
-@export var death_effect_value: float = 0.0 # 爆発ダメージ等
-@export var death_effect_range: float = 0.0 # 爆発範囲等
+@export var death_effect_type: String = "" # 死亡時の特殊効果（例: "explosion"）
+var death_effect_value: float = 0.0 # 効果値（爆発ダメージなど）
+var death_effect_range: float = 0.0 # 効果範囲
+var is_upgraded: bool = false # アップグレード済みフラグ
+
+# --- 演出用変数 ---
+# 見た目（ハクスラとしての演出用）
+@export var visual_size: float = 30.0        # ユニットのサイズ
+@export var unit_color: Color = Color.WHITE  # ユニットの色
 
 # === 内部状態 ===
 var current_hp: float = 0.0       # 現在HP
@@ -58,6 +75,15 @@ var actual_speed: float = 0.0
 var is_advancing: bool = false
 # BattleFieldへの参照（待機/後退ロジックなどで使用）
 var battlefield_ref = null
+
+# === ラリーポイント（指定地点待機） ===
+# -1.0 = 未設定（デフォルトのロール別ラインを使う）
+# 0以上 = 指定された座標へ移動して待機する
+var rally_x: float = -1.0
+
+# === 選択ハイライト ===
+var is_selected: bool = false
+var highlight_rect: ColorRect = null
 
 # === 拠点到達の境界座標 ===
 # BattleFieldから設定される。この座標を超えたら拠点に到達とみなす
@@ -86,6 +112,8 @@ func _ready() -> void:
 	_create_temp_sprite()
 	# HPバーの作成
 	_create_hp_bar()
+	# 選択ハイライト枠の作成
+	_create_highlight()
 
 func _process(delta: float) -> void:
 	if not is_alive:
@@ -134,7 +162,8 @@ func _do_move(delta: float) -> void:
 	var current_move_dir: float = move_direction
 	if team == Team.PLAYER and unit_role != 0:
 		if not is_advancing: # 待機・後退状態
-			var stop_x: float = _get_defend_line_x()
+			# ラリーポイントが設定されていればそこへ、未設定ならロール別デフォルトラインへ
+			var stop_x: float = rally_x if rally_x >= 0.0 else _get_defend_line_x()
 			# 許容誤差±5px
 			if position.x > stop_x + 5.0:
 				# ラインより進みすぎている → 自陣へ逃げ帰る（左へ）
@@ -148,6 +177,15 @@ func _do_move(delta: float) -> void:
 	
 	# 実際の速度（ゆらぎ込み）×方向で更新
 	position.x += actual_speed * current_move_dir * delta
+	
+	# 移動中のボビング（上下の揺れ）と前のめりアニメーション
+	# Time.get_ticks_msec() を使って歩行の躍動感を出す
+	var time_sec = Time.get_ticks_msec() / 1000.0
+	var bob_speed = actual_speed * 0.15
+	var sprite_node = get_node_or_null("SpriteRect")
+	if sprite_node:
+		sprite_node.rotation_degrees = current_move_dir * 10.0 # 前のめり
+		sprite_node.position.y = -visual_size + sin(time_sec * bob_speed) * (visual_size * 0.15) # 上下にポヨンポヨン跳ねる
 	
 	# --- 拠点到達チェック ---
 	# 自軍は右端(敵拠点)に到達、敵軍は左端(自陣)に到達で拠点ダメージ
@@ -177,6 +215,31 @@ func order_command(advance: bool) -> void:
 	if unit_role == 0:
 		return # アサルト(突撃兵)は命令を無視して常に前進する
 	is_advancing = advance
+
+# === ユニット種別のラリーポイントを設定 ===
+func set_rally_point(x_pos: float) -> void:
+	if unit_role == 0:
+		return # 突撃兵は命令無視
+	rally_x = x_pos
+	# ラリーポイントが設定されたら突撃状態を解除（待機に戻す）
+	is_advancing = false
+
+# === 選択ハイライトの切り替え ===
+func set_selected(selected: bool) -> void:
+	is_selected = selected
+	if highlight_rect:
+		highlight_rect.visible = selected
+
+# === 選択ハイライト枠の作成 ===
+func _create_highlight() -> void:
+	highlight_rect = ColorRect.new()
+	highlight_rect.name = "Highlight"
+	highlight_rect.color = Color(1.0, 1.0, 1.0, 0.3)
+	highlight_rect.size = Vector2(visual_size + 8, visual_size + 8)
+	highlight_rect.position = Vector2(-(visual_size + 8) / 2.0, -visual_size - 4)
+	highlight_rect.visible = false
+	highlight_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(highlight_rect)
 
 # === ロールに応じた防衛ラインX座標を取得 ===
 func _get_defend_line_x() -> float:
@@ -220,34 +283,114 @@ func _apply_soft_collision(delta: float) -> void:
 
 # === 攻撃処理（前方範囲薙ぎ払い） ===
 func _do_attack(delta: float) -> void:
+	# 攻撃準備（振りかぶり）の演出
+	var windup = attack_windup_time
+	if windup < 0.0:
+		windup = minf(0.6, attack_interval * 0.4) # デフォルト値（自動設定）
+		
+	var is_winding_up = (attack_interval - attack_timer) < windup
+	var sprite_node = get_node_or_null("SpriteRect")
+	if sprite_node:
+		if is_winding_up:
+			# 攻撃が近づくと、逆方向に大きく傾いて「タメ」を作る
+			var wind_tilt = -move_direction * 25.0
+			sprite_node.rotation_degrees = lerp(sprite_node.rotation_degrees, wind_tilt, delta * 5.0)
+		else:
+			# それ以外は基本姿勢へ戻ろうとする（ひるみ中でなければ）
+			if local_hit_stop_timer <= 0.0:
+				sprite_node.rotation_degrees = lerp(sprite_node.rotation_degrees, 0.0, delta * 10.0)
+
 	attack_timer += delta
 	# 攻撃間隔ごとにダメージを与える
 	if attack_timer >= attack_interval:
 		attack_timer = 0.0
 		
-		# 攻撃アニメーション（物理的に一瞬前に出て戻る）
+		# 攻撃アニメーション（タメからドスーンと前に踏み込む）
 		var original_x = position.x
+		var original_rot = 0.0
+		if sprite_node:
+			original_rot = sprite_node.rotation_degrees
+			
 		var tween := create_tween()
-		tween.tween_property(self, "position:x", position.x + move_direction * 15.0, 0.05).set_trans(Tween.TRANS_QUAD)
-		tween.tween_property(self, "position:x", original_x, 0.1).set_trans(Tween.TRANS_QUAD)
+		# 重もっくるしく前方に踏み込む（0.15秒で大きく前進）
+		var lunge_dist = visual_size * 0.8
+		tween.tween_property(self, "position:x", position.x + move_direction * lunge_dist, 0.15).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
+		# ゆっくり元の位置に戻る
+		tween.tween_property(self, "position:x", original_x, 0.3).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 		
-		# ---- 範囲内の全ての敵にダメージ（ハクスラ感・Epic War感のコア） ----
-		var hit_count: int = 0
-		var units_parent = get_parent()
-		if units_parent != null:
-			for enemy in units_parent.get_children():
-				if enemy is BaseUnit and enemy != self and enemy.team != team and enemy.is_alive:
-					if _is_in_range(enemy):
-						enemy.take_damage(atk, self) # 攻撃元を渡してノックバック判定させる
-						hit_count += 1
+		if sprite_node:
+			# 振り下ろすように前にガクンと傾く
+			sprite_node.rotation_degrees = move_direction * 45.0
+			var rot_tween = create_tween()
+			rot_tween.tween_property(sprite_node, "rotation_degrees", 0.0, 0.4).set_trans(Tween.TRANS_BOUNCE)
 		
-		# 攻撃を1体以上に当てた場合、自分自身も一瞬だけ動きを止めて「手応え」を出す
-		if hit_count > 0:
-			local_hit_stop_timer = 0.05 # 自身も少しだけヒットストップ
+		if is_ranged:
+			# 遠距離攻撃の場合
+			_spawn_projectile()
+		else:
+			# 近接攻撃の場合
+			_spawn_slash_effect()
+			
+			var hit_count: int = 0
+			var units_parent = get_parent()
+			if units_parent != null:
+				for enemy in units_parent.get_children():
+					if enemy is BaseUnit and enemy != self and enemy.team != team and enemy.is_alive:
+						if _is_in_range(enemy):
+							enemy.take_damage(atk, self)
+							hit_count += 1
+			
+			if hit_count > 0:
+				# 激しい攻撃は自分にも少しヒットストップ（重みの演出）
+				local_hit_stop_timer = 0.1
+
+# === 遠距離用の弾(Projectile)をスポーン ===
+func _spawn_projectile() -> void:
+	if current_target == null or not is_instance_valid(current_target):
+		return # 対象がいなければ撃てない
 		
-		# デバッグ用（ヒット数が多ければ「ドカッ！」と入った感じになる）
-		# if hit_count > 1:
-		# 	print("%s の範囲攻撃！ %d体の敵に ヒット！" % [unit_name, hit_count])
+	var battle_field = get_node_or_null("../../")
+	if battle_field == null:
+		return
+		
+	# 弾のシーン（スクリプト）を読み込んでインスタンス化
+	var proj_script = load("res://Scripts/Projectile.gd")
+	if proj_script == null:
+		return
+		
+	var proj = proj_script.new()
+	proj.team = team
+	proj.damage = atk
+	proj.speed = projectile_speed
+	proj.knockback_chance = knockback_chance
+	proj.knockback_power = knockback_power
+	proj.knockback_direction = knockback_direction
+	proj.flinch_chance = flinch_chance
+	proj.flinch_duration = flinch_duration
+	proj.source_unit = self
+	proj.visual_size = 8.0
+	# 弓兵の色と同じか、設定された色
+	proj.projectile_color = projectile_color if projectile_color != Color.WHITE else unit_color
+	proj.aoe_range = projectile_aoe
+	proj.move_direction = move_direction
+	
+	# 少し高めから発射
+	proj.position = position + Vector2(move_direction * visual_size * 0.5, -visual_size * 0.8)
+	# 足元を狙う
+	var tgt_pos = current_target.position + Vector2(0, -5.0) 
+	
+	# ランダムなバラけ（弓のブレ）を少しだけ追加
+	tgt_pos.x += randf_range(-15.0, 15.0)
+	tgt_pos.y += randf_range(-5.0, 5.0)
+	
+	proj.target_pos = tgt_pos
+	
+	# 戦場に追加（Unitsノード）
+	var units_parent = get_parent()
+	if units_parent != null:
+		units_parent.add_child(proj)
+	else:
+		battle_field.add_child(proj)
 
 # === ダメージ受理 ===
 func take_damage(damage: float, source_unit = null, is_spell: bool = false) -> void:
@@ -269,6 +412,9 @@ func take_damage(damage: float, source_unit = null, is_spell: bool = false) -> v
 	# ダメージポップアップの表示
 	_spawn_damage_text(actual_damage, is_spell)
 	
+	# ヒットスパーク（打撃火花）の発生
+	_spawn_hit_spark(is_spell)
+	
 	# ダメージを受けた視覚フィードバック（点滅）
 	_flash_damage()
 	
@@ -280,31 +426,73 @@ func take_damage(damage: float, source_unit = null, is_spell: bool = false) -> v
 	# ノックバックの判定（生きていて、攻撃元にノックバック率がある場合）
 	if source_unit != null and source_unit.knockback_chance > 0.0:
 		if randf() * 100.0 <= source_unit.knockback_chance:
-			_apply_knockback(source_unit.knockback_power, source_unit.move_direction)
+			_apply_knockback(source_unit.knockback_power, source_unit.move_direction, source_unit.get("knockback_direction"))
+	
+	# ひるみの判定
+	if source_unit != null and source_unit.get("flinch_chance") != null and source_unit.flinch_chance > 0.0:
+		if randf() * 100.0 <= source_unit.flinch_chance:
+			_apply_flinch(source_unit.flinch_duration)
+
+# === ひるみ処理（スタン） ===
+func _apply_flinch(duration: float) -> void:
+	# 既存のヒットストップタイマーを上書き・延長する
+	if local_hit_stop_timer < duration:
+		local_hit_stop_timer = duration
+	
+	# 少しだけ後ろにそけぞる演出
+	var sprite_node = get_node_or_null("SpriteRect")
+	if sprite_node:
+		var original_rot = 0.0 # デフォルトの角度
+		sprite_node.rotation_degrees = -move_direction * 15.0
+		var rot_tween = create_tween()
+		rot_tween.tween_property(sprite_node, "rotation_degrees", original_rot, duration)
 
 # === 吹き飛ばし処理（ノックバック） ===
-func _apply_knockback(power: float, attacker_direction: float) -> void:
-	# 耐性で飛ぶ距離を減衰
-	var actual_distance = power * maxf(1.0 - kb_resistance / 100.0, 0.0)
-	if actual_distance <= 0.0:
+func _apply_knockback(power: float, attacker_direction: float, direction_vec = null) -> void:
+	if direction_vec == null:
+		direction_vec = Vector2(1.0, -0.5)
+		
+	var actual_power = power * maxf(1.0 - kb_resistance / 100.0, 0.0)
+	if actual_power <= 0.0:
 		return
 	
-	# 相手の攻撃方向（attacker_direction）へ飛ぶ
-	var target_x = position.x + (attacker_direction * actual_distance)
-	var original_y = position.y
-	var jump_height = 20.0 # 吹き飛ぶときの浮く高さ
+	if local_hit_stop_timer < 0.4:
+		local_hit_stop_timer = 0.4
 	
-	# XYを並行して動かし、放物線を描くように弾き飛ばされる
+	# 重いほどY軸（打ち上げ）を強調する
+	var knockback_offset = Vector2(attacker_direction * direction_vec.x * actual_power, direction_vec.y * actual_power)
+	var target_x = position.x + knockback_offset.x
+	var original_y = position.y
+	var jump_height = abs(knockback_offset.y) * 1.5 # 打ち上げを1.5倍に強調！（ドーパミン！）
+	
+	# 滞空時間は打ち上げ高さに比例して長くなる（落下物理演算っぽい挙動）
+	var air_time_up = minf(0.3 + (jump_height / 500.0), 0.6)
+	var air_time_down = minf(0.2 + (jump_height / 400.0), 0.5)
+	
+	# XとYをそれぞれの時間で動かす
 	var tween = create_tween().set_parallel(true)
-	tween.tween_property(self, "position:x", target_x, 0.25).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	tween.tween_property(self, "position:y", original_y - jump_height, 0.12).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	var total_time = air_time_up + air_time_down
+	tween.tween_property(self, "position:x", target_x, total_time).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tween.tween_property(self, "position:y", original_y - jump_height, air_time_up).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	
 	var fall_tween = create_tween()
-	fall_tween.tween_interval(0.12)
-	fall_tween.tween_property(self, "position:y", original_y, 0.13).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	fall_tween.tween_interval(air_time_up)
+	fall_tween.tween_property(self, "position:y", original_y, air_time_down).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 	
-	# ※注意: ノックバック中は一時的に操作不能（スタン）にする処理は
-	# 現在の「強制X移動」と被るため、一旦は「見た目上強引に吹っ飛ぶ」仕様とする
+	# 空中でグルグル回転しながら落ちるアニメーション！
+	var sprite_node = get_node_or_null("SpriteRect")
+	if sprite_node:
+		var spins = 1
+		if jump_height > 100.0: spins = 2
+		if jump_height > 200.0: spins = 3
+		
+		# 後ろ向きに回転
+		var spin_angle = -attacker_direction * 360.0 * spins
+		var rot_tween = create_tween()
+		sprite_node.rotation_degrees = 0
+		rot_tween.tween_property(sprite_node, "rotation_degrees", spin_angle, total_time).set_trans(Tween.TRANS_LINEAR)
+		# 着地時に0度に戻る
+		rot_tween.chain().tween_property(sprite_node, "rotation_degrees", 0.0, 0.1)
 
 # === 死亡処理 ===
 func _die() -> void:
@@ -414,9 +602,12 @@ func _trigger_death_explosion() -> void:
 					var fake_explosion_source = BaseUnit.new()
 					fake_explosion_source.knockback_chance = 100.0
 					fake_explosion_source.knockback_power = knockback_power # 自分のノックバック力を使う
+					fake_explosion_source.knockback_direction = get("knockback_direction") if get("knockback_direction") else Vector2(1.0, -1.0)
+					fake_explosion_source.flinch_chance = get("flinch_chance") if get("flinch_chance") else 100.0
+					fake_explosion_source.flinch_duration = get("flinch_duration") if get("flinch_duration") else 1.0
 					fake_explosion_source.move_direction = push_dir
 					
-					enemy.take_damage(death_effect_value, fake_explosion_source)
+					enemy.take_damage(death_effect_value, fake_explosion_source, false)
 					fake_explosion_source.queue_free()
 					hit_count += 1
 	
@@ -453,21 +644,101 @@ func _find_nearest_enemy() -> BaseUnit:
 func _is_in_range(target: BaseUnit) -> bool:
 	return abs(target.position.x - position.x) <= attack_range
 
-# === 仮スプライトの作成 ===
-# なぜColorRect？→ まだアートが無いので、色付き四角形でユニットを表現する
+# === 仮スプライト作成 ===
 func _create_temp_sprite() -> void:
-	sprite_rect = ColorRect.new()
-	sprite_rect.size = Vector2(24, 32)
-	# 中心を基準にするためオフセット
-	sprite_rect.position = Vector2(-12, -32)
+	var rect = ColorRect.new()
+	rect.name = "SpriteRect"
+	rect.size = Vector2(visual_size, visual_size)
+	# 足元（中央下）を原点として配置
+	rect.position = Vector2(-visual_size/2.0, -visual_size) 
+	rect.pivot_offset = Vector2(visual_size/2.0, visual_size) # 回転の軸も足元に
 	
-	# チームに応じた色分け
-	if team == Team.PLAYER:
-		sprite_rect.color = Color(0.3, 0.6, 1.0)   # 青（自軍）
+	if unit_color != Color.WHITE:
+		rect.color = unit_color
 	else:
-		sprite_rect.color = Color(1.0, 0.3, 0.3)   # 赤（敵軍）
+		if team == Team.PLAYER:
+			rect.color = Color(0.3, 0.6, 1.0) # デフォルト青
+		else:
+			rect.color = Color(1.0, 0.3, 0.3) # デフォルト赤
+			
+	add_child(rect)
 	
-	add_child(sprite_rect)
+	# 強化済みならオーラを付ける
+	if is_upgraded:
+		var aura = ColorRect.new()
+		aura.name = "UpgradeAura"
+		aura.size = Vector2(visual_size + 4, visual_size + 4)
+		aura.position = Vector2(-visual_size/2.0 - 2, -visual_size - 2)
+		aura.pivot_offset = Vector2(visual_size/2.0 + 2, visual_size + 2)
+		aura.color = Color(1.0, 0.9, 0.2, 0.3) # 黄色の半透明
+		aura.z_index = -1
+		add_child(aura)
+		
+		# オーラのアニメーション（フワフワ）
+		var tween = create_tween().set_loops()
+		tween.tween_property(aura, "scale", Vector2(1.1, 1.1), 0.5)
+		tween.tween_property(aura, "scale", Vector2(1.0, 1.0), 0.5)
+
+# === 斬撃エフェクトの生成 ===
+func _spawn_slash_effect() -> void:
+	var battle_field = get_node_or_null("../../")
+	if battle_field == null: return
+	
+	var slash = ColorRect.new()
+	slash.color = Color(1.0, 1.0, 0.8, 0.8) if team == Team.PLAYER else Color(1.0, 0.4, 0.4, 0.8)
+	slash.size = Vector2(attack_range * 0.8, visual_size * 0.2)
+	slash.position = position + Vector2(move_direction * visual_size * 0.5, -visual_size * 0.5)
+	if move_direction < 0:
+		slash.position.x -= slash.size.x # 左向きの場合は位置調整
+		
+	# 角度を少しランダムにつけて「斬りつけた」感を出す
+	slash.pivot_offset = slash.size / 2.0
+	slash.rotation_degrees = randf_range(-30, 30)
+	
+	battle_field.add_child(slash)
+	
+	# シュパッ！と伸びて消える
+	var tween = slash.create_tween().set_parallel(true)
+	tween.tween_property(slash, "scale:x", 1.5, 0.1).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
+	tween.tween_property(slash, "scale:y", 0.1, 0.1).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
+	tween.tween_property(slash, "modulate:a", 0.0, 0.1)
+	
+	var end_tween = slash.create_tween()
+	end_tween.tween_interval(0.15)
+	end_tween.tween_callback(slash.queue_free)
+
+# === ヒットスパーク（火花演出）の生成 ===
+func _spawn_hit_spark(is_spell: bool) -> void:
+	var battle_field = get_node_or_null("../../")
+	if battle_field == null: return
+	
+	# メインの火花
+	var spark = ColorRect.new()
+	if is_spell:
+		spark.color = Color(1.0, 0.6, 0.2) # スペルは大きくオレンジ
+		spark.size = Vector2(visual_size * 0.8, visual_size * 0.8)
+	else:
+		spark.color = Color(1.0, 0.9, 0.5) # 通常攻撃は黄色っぽい白
+		spark.size = Vector2(visual_size * 0.5, visual_size * 0.5)
+		
+	spark.pivot_offset = spark.size / 2.0
+	
+	# バラけるようにランダム配置
+	var offset_x = randf_range(-visual_size * 0.4, visual_size * 0.4)
+	var offset_y = randf_range(-visual_size * 0.8, -visual_size * 0.2)
+	spark.position = position + Vector2(offset_x, offset_y) - spark.size / 2.0
+	spark.rotation_degrees = randf_range(0, 360)
+	
+	battle_field.add_child(spark)
+	
+	# パッと広がってシュッと消える
+	var tween = spark.create_tween().set_parallel(true)
+	tween.tween_property(spark, "scale", Vector2(1.8, 1.8), 0.1).set_trans(Tween.TRANS_ELASTIC).set_ease(Tween.EASE_OUT)
+	tween.tween_property(spark, "modulate:a", 0.0, 0.15).set_ease(Tween.EASE_IN)
+	
+	var end_tween = spark.create_tween()
+	end_tween.tween_interval(0.15)
+	end_tween.tween_callback(spark.queue_free)
 
 # === HPバーの作成 ===
 func _create_hp_bar() -> void:

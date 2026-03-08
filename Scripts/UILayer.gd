@@ -6,10 +6,17 @@ extends Control
 # === 参照 ===
 @onready var hand_container: HBoxContainer = $HandContainer
 @onready var debug_label: Label = $DebugLabel
+@onready var roster_container: HBoxContainer = $RosterContainer
 
 # === 内部状態 ===
 var slot_uis: Array[CardUI] = []
 var deck_manager: DeckManager = null
+var roster_count_labels: Dictionary = {}
+
+# === ウェーブ関連 ===
+var wave_manager: WaveManager = null
+var wave_info_panel: PanelContainer = null
+var wave_info_label: Label = null
 
 # === スペル関連 ===
 var spell_manager: SpellManager = null
@@ -31,6 +38,8 @@ func _ready() -> void:
 func _process(_delta: float) -> void:
 	_update_card_cds()
 	_update_spell_cds()
+	_update_roster_counts()
+	_update_wave_info()
 
 # === デッキマネージャーを接続する ===
 func connect_deck_manager(dm: DeckManager) -> void:
@@ -38,6 +47,7 @@ func connect_deck_manager(dm: DeckManager) -> void:
 	dm.hand_initialized.connect(_on_hand_initialized)
 	dm.slot_updated.connect(_on_slot_updated)
 	dm.deck_counts_changed.connect(_on_deck_counts_changed)
+	dm.charge_changed.connect(_on_charge_changed)
 	print("[UILayer] DeckManagerとの接続完了")
 	
 	# 既にデッキが初期化済みの場合
@@ -47,6 +57,68 @@ func connect_deck_manager(dm: DeckManager) -> void:
 			var card = dm.get_card_at(i)
 			if card != null:
 				_on_slot_updated(i, card)
+	
+	# ロスターUI（全所有ユニット一覧）の作成
+	if dm.original_deck.size() > 0:
+		_create_roster_ui(dm.original_deck)
+
+# === ロスターUIの作成 ===
+func _create_roster_ui(deck: Array[CardData]) -> void:
+	if roster_container == null:
+		return
+	roster_count_labels.clear()
+	var unique_units = {}
+	for card in deck:
+		if not unique_units.has(card.unit_name):
+			unique_units[card.unit_name] = card
+			
+	for u_name in unique_units.keys():
+		var card = unique_units[u_name]
+		
+		var vbox = VBoxContainer.new()
+		vbox.alignment = BoxContainer.ALIGNMENT_CENTER
+		vbox.add_theme_constant_override("separation", 2)
+		
+		# ユニットのアイコン代わりのボタン
+		var btn = Button.new()
+		btn.text = u_name
+		btn.custom_minimum_size = Vector2(80, 36)
+		btn.add_theme_font_size_override("font_size", 14)
+		var style = StyleBoxFlat.new()
+		style.bg_color = card.unit_color
+		style.set_corner_radius_all(6)
+		style.border_width_left = 2; style.border_width_right = 2; style.border_width_top = 2; style.border_width_bottom = 2
+		style.border_color = Color(1, 1, 1, 0.4)
+		btn.add_theme_stylebox_override("normal", style)
+		
+		var style_hover = style.duplicate()
+		style_hover.bg_color = style.bg_color.lightened(0.2)
+		btn.add_theme_stylebox_override("hover", style_hover)
+		
+		btn.pressed.connect(_on_roster_button_pressed.bind(u_name))
+		
+		# 生存数ラベル
+		var count_label = Label.new()
+		count_label.text = "生存: 0"
+		count_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		count_label.add_theme_font_size_override("font_size", 12)
+		
+		vbox.add_child(btn)
+		vbox.add_child(count_label)
+		
+		roster_container.add_child(vbox)
+		roster_count_labels[u_name] = count_label
+
+func _on_roster_button_pressed(u_name: String) -> void:
+	if battlefield_ref and battlefield_ref.has_method("select_unit_type_by_name"):
+		battlefield_ref.select_unit_type_by_name(u_name)
+
+func _update_roster_counts() -> void:
+	if battlefield_ref == null or not battlefield_ref.has_method("get_alive_count_by_name"):
+		return
+	for u_name in roster_count_labels.keys():
+		var count = battlefield_ref.get_alive_count_by_name(u_name)
+		roster_count_labels[u_name].text = "生存: %d" % count
 
 # === スペルマネージャーを接続する ===
 func connect_spell_manager(sm: SpellManager) -> void:
@@ -57,6 +129,61 @@ func connect_spell_manager(sm: SpellManager) -> void:
 	for i in range(sm.slot_count):
 		if i < spell_buttons.size() and sm.spell_slots[i] != null:
 			spell_buttons[i].set_spell(sm.spell_slots[i])
+
+# === ウェーブマネージャーを接続する ===
+func connect_wave_manager(wm: WaveManager) -> void:
+	wave_manager = wm
+	_create_wave_info_ui()
+	print("[UILayer] WaveManagerとの接続完了")
+
+func _create_wave_info_ui() -> void:
+	wave_info_panel = PanelContainer.new()
+	wave_info_panel.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	wave_info_panel.anchor_left = 0.75
+	wave_info_panel.anchor_top = 0.05
+	wave_info_panel.anchor_right = 0.98
+	wave_info_panel.anchor_bottom = 0.20
+	wave_info_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	
+	var style = StyleBoxFlat.new()
+	style.bg_color = Color(0.1, 0.1, 0.1, 0.8)
+	style.set_corner_radius_all(8)
+	wave_info_panel.add_theme_stylebox_override("panel", style)
+	
+	var margin = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 15)
+	margin.add_theme_constant_override("margin_top", 10)
+	margin.add_theme_constant_override("margin_right", 15)
+	margin.add_theme_constant_override("margin_bottom", 10)
+	wave_info_panel.add_child(margin)
+	
+	wave_info_label = Label.new()
+	wave_info_label.text = "ウェーブ情報"
+	wave_info_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	wave_info_label.add_theme_font_size_override("font_size", 14)
+	margin.add_child(wave_info_label)
+	
+	add_child(wave_info_panel)
+
+func _update_wave_info() -> void:
+	if wave_manager == null or wave_info_label == null:
+		return
+		
+	var info = wave_manager.get_next_wave_info()
+	if info.get("is_final", false):
+		wave_info_label.text = "最終ウェーブ進行中\n敵拠点を破壊せよ！"
+	else:
+		var text = "== 次のウェーブ (%d/%d) ==\n" % [info["wave_num"], info["total_waves"]]
+		
+		if info["time_left"] > 0:
+			text += "残り %.1f 秒\n" % info["time_left"]
+		else:
+			text += "⚠️ スポーン中！\n"
+			
+		text += "\n[出現予定]\n"
+		for e_str in info["enemies"]:
+			text += e_str + "\n"
+		wave_info_label.text = text
 
 # === BattleFieldの参照をセットする ===
 func set_battlefield_ref(bf) -> void:
@@ -136,18 +263,18 @@ func _on_spell_drag_canceled(slot_index: int) -> void:
 	# ドロップせずにキャンセルした場合、時間停止を解除しておく
 	spell_manager.cancel_time_stop()
 
-# === 戦場領域へのドラッグ＆ドロップ（GUI標準機能） ===
+# === 戦場領域へのドラッグ＆ドロップ（スペル用） ===
 func _can_drop_data(at_position: Vector2, data: Variant) -> bool:
-	if typeof(data) == TYPE_DICTIONARY and data.has("type") and data["type"] == "spell":
-		# UIRootは画面全体(1280x720)を覆う。Yが432以下なら戦場とみなす（どこでも落とせるように広めに取る）
-		return true
+	if typeof(data) == TYPE_DICTIONARY and data.has("type"):
+		if data["type"] == "spell":
+			return true
 	return false
 
 func _drop_data(at_position: Vector2, data: Variant) -> void:
-	if typeof(data) == TYPE_DICTIONARY and data.has("type") and data["type"] == "spell":
-		if spell_manager:
-			# ドロップした位置を対象座標としてスペルを確定する
-			spell_manager.confirm_spell(at_position)
+	if typeof(data) == TYPE_DICTIONARY and data.has("type"):
+		if data["type"] == "spell":
+			if spell_manager:
+				spell_manager.confirm_spell(at_position)
 
 # === 毎フレーム、スペルCDを更新 ===
 func _update_spell_cds() -> void:
@@ -158,6 +285,12 @@ func _update_spell_cds() -> void:
 			var progress: float = spell_manager.get_cd_progress(i)
 			var remaining: float = spell_manager.get_cd_remaining(i)
 			spell_buttons[i].update_cd(progress, remaining)
+
+# === チャージ数変化時 ===
+func _on_charge_changed(slot_index: int, remaining: int, max_charge: int) -> void:
+	if slot_index >= 0 and slot_index < slot_uis.size():
+		if is_instance_valid(slot_uis[slot_index]):
+			slot_uis[slot_index].update_charge(remaining, max_charge)
 
 # === デッキ/捨て札の枚数変更時 ===
 func _on_deck_counts_changed(deck_size: int, discard_size: int) -> void:
