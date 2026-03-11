@@ -21,8 +21,8 @@ var cycle_timer_label: Label = null
 # === ドラッグ＆ドロップ状態 ===
 var dragging_slot_index: int = -1
 var dragging_ghost: ColorRect = null
-# 配置可能X上限（城砦占領で広がる。初期は自陣付近のみ）
-var player_deploy_limit_x: float = 200.0
+# 配置可能X上限（マップの半分）
+var player_deploy_limit_x: float = 640.0
 # 無効ゾーンのフィードバック用（ゴーストに重ねるロックアイコン）
 var drag_invalid_label: Label = null
 
@@ -157,7 +157,7 @@ func set_deploy_limit(new_limit: float) -> void:
 func _is_valid_drop_zone(x: float, y: float, card: CardData) -> bool:
 	if y >= 420.0:
 		return false
-	# player_deploy_limit_xは城砦占領で動的に拡大する
+	# 動的な拡大は廃止され、初期値(マップ半分=640)で固定
 	var midpoint: float = player_deploy_limit_x
 	match card.place_zone:
 		CardData.PlaceZone.ALLY_SIDE:

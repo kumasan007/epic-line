@@ -32,8 +32,8 @@ var enemy_hp: float = 0.0
 var battle_ended: bool = false
 var earned_gold: int = 0
 
-# 初期は配置可能範囲を戦場のほぼ全体に設定
-var player_deploy_limit_x: float = 1150.0
+# 配置可能範囲をマップの半分に設定（1280幅なので640を中心とする）
+var player_deploy_limit_x: float = 640.0
 # 配置可能ゾーンのビジュアル
 var deploy_zone_node: Node2D = null
 
