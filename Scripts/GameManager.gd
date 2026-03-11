@@ -203,6 +203,69 @@ func _generate_initial_deck() -> void:
     
     player_deck.append(hawk)
     
+    # --- 騎兵（突破役）× 1 ---
+    # 役割: 高速で敵陣に突っ込み、強力なノックバックで前線を押し上げる
+    var cav := CardData.new()
+    cav.card_name = "騎兵"
+    cav.description = "高速移動と強力なノックバック"
+    cav.unit_role = CardData.UnitRole.FIGHTER
+    cav.mana_cost = 3
+    cav.summon_count = 1
+    cav.unit_name = "騎兵"
+    cav.max_hp = 120.0
+    cav.atk = 18.0
+    cav.attack_range = 35.0
+    cav.speed = 100.0  # かなり速い
+    cav.attack_interval = 1.0
+    cav.attack_windup_time = 0.2
+    cav.knockback_chance = 80.0
+    cav.knockback_power = 90.0
+    cav.knockback_direction = Vector2(1.0, -1.0)
+    cav.visual_size = 35.0
+    cav.unit_color = Color(0.8, 0.4, 0.2)
+    player_deck.append(cav)
+
+    # --- 魔術師（範囲攻撃）× 1 ---
+    # 役割: 攻撃間隔は遅いが、着弾地点の周囲にダメージを与える。集団戦に強い
+    var mage := CardData.new()
+    mage.card_name = "魔術師"
+    mage.description = "着弾時に爆発する範囲魔法"
+    mage.unit_role = CardData.UnitRole.SHOOTER
+    mage.mana_cost = 2
+    mage.summon_count = 1
+    mage.unit_name = "魔術師"
+    mage.max_hp = 40.0
+    mage.atk = 25.0
+    mage.attack_range = 250.0
+    mage.speed = 40.0
+    mage.attack_interval = 2.0
+    mage.attack_windup_time = 0.4
+    mage.is_ranged = true
+    mage.projectile_speed = 300.0
+    mage.projectile_aoe = 60.0  # 半径60の範囲ダメージ
+    mage.visual_size = 25.0
+    mage.unit_color = Color(0.5, 0.1, 0.8)
+    player_deck.append(mage)
+
+    # --- 暗殺者（一点突破）× 1 ---
+    # 役割: 非常に脆いが、とてつもない火力と攻撃速度で厄介な敵を即座に葬る
+    var assassin := CardData.new()
+    assassin.card_name = "暗殺者"
+    assassin.description = "超火力・超紙装甲の近接特化"
+    assassin.unit_role = CardData.UnitRole.ASSAULT
+    assassin.mana_cost = 2
+    assassin.summon_count = 1
+    assassin.unit_name = "暗殺者"
+    assassin.max_hp = 30.0  # 弓1〜2発で沈む
+    assassin.atk = 40.0
+    assassin.attack_range = 30.0
+    assassin.speed = 120.0
+    assassin.attack_interval = 0.4  # 高速連撃
+    assassin.attack_windup_time = 0.1
+    assassin.visual_size = 20.0
+    assassin.unit_color = Color(0.2, 0.2, 0.2)
+    player_deck.append(assassin)
+    
     # --- 火球（即時スペル） × 2 ---
     # 特徴：指定位置周辺の敵にAoEダメージ。前線が崩壊しそうな時の緊急手段。
     for i in range(2):

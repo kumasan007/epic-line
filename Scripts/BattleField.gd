@@ -32,17 +32,9 @@ var enemy_hp: float = 0.0
 var battle_ended: bool = false
 var earned_gold: int = 0
 
-# --- チェックポイント城システム ---
-# 城砦はすべて最初は「敵所有」。ユニットが占領して初めて前進できる。
-const CHECKPOINT_XS: Array = [380.0, 640.0, 900.0]  # 城砦のX座標（前線・中央・敵陣前）
-const CHECKPOINT_HP: float = 800.0                   # 各城砦のHP（3体で約16秒かかる硬さ）
-const CHECKPOINT_DPS: float = 50.0                   # ユニット1体あたりの城砦への毎秒ダメージ
-var checkpoint_units: Array = []                     # 城砦のBaseUnitインスタンス
-var checkpoint_captured: Array[bool] = []            # プレイヤーが占領済みか
-# 初期は自陣付近(200px)のみ配置可能。城砦占領で段階的に広がる
-# 初期は自陣付近(200px)のみ配置可能。城砦占領で段階的に広がる
-var player_deploy_limit_x: float = 200.0
-# 配置可能ゾーンのビジュアル（市松模様。占領で動的に更新）
+# 初期は配置可能範囲を戦場のほぼ全体に設定
+var player_deploy_limit_x: float = 1150.0
+# 配置可能ゾーンのビジュアル
 var deploy_zone_node: Node2D = null
 
 # --- 時間停止 ---
@@ -55,18 +47,6 @@ var hit_stop_timer: float = 0.0
 var camera_shake_timer: float = 0.0
 var camera_shake_intensity: float = 0.0
 var original_camera_pos: Vector2 = Vector2.ZERO
-
-# --- ユニット選択システム ---
-var selected_unit_name: String = ""  # 現在選択中のユニット種別名（"" = 未選択）
-var rally_flag: ColorRect = null     # ラリーポイントの旗表示用
-var unit_rally_points: Dictionary = {} # { "unit_name": float(rally_x) } 新規生成ユニットへ引き継ぐため
-
-# --- 選択中専用の指揮UI ---
-var selection_ui_canvas: CanvasLayer = null
-var selection_ui_container: HBoxContainer = null
-
-# --- 遅延スペル予約リスト（SPELL_CYCLE用） ---
-var _pending_spells: Array[Dictionary] = []
 
 # --- 拠点HPバー（画面上部に表示） ---
 var player_hp_bar: ColorRect = null
@@ -106,8 +86,7 @@ func _ready() -> void:
 	# UILayerとの接続
 	_connect_ui_layer()
 	
-	# チェックポイント城を生成
-	_setup_checkpoints()
+
 	
 	# 配置可能ゾーンの地面ビジュアルを生成
 	_setup_deploy_zone_visual()
@@ -115,9 +94,6 @@ func _ready() -> void:
 	if main_camera:
 		original_camera_pos = main_camera.position
 		
-	# --- 選択時専用の指揮UI（矢印ボタン）を作成 ---
-	_create_selection_ui()
-	
 	# === 実時間ウェーブ制：最初から時間は進み始める ===
 	# 時止めは廃止されました
 
@@ -141,8 +117,7 @@ func _process(delta: float) -> void:
 		if hit_stop_timer <= 0.0:
 			Engine.time_scale = 1.0
 	
-	# -- チェックポイント城砦の占領チェック --
-	_update_checkpoints(delta)
+
 	
 	# -- 拠点へのダメージ判定とピンチ演出 --
 	_check_base_damage(delta)
@@ -220,134 +195,6 @@ func trigger_impact(hit_stop_duration: float = 0.05, shake_intensity: float = 10
 	if shake_duration > camera_shake_timer:
 		camera_shake_timer = shake_duration
 
-# === ユニット選択＆ラリーポイント設定のクリック処理 ===
-func _input(event: InputEvent) -> void:
-	if battle_ended:
-		return
-	
-	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
-		# UI領域（画面Y座標 >= 420）は無視（スクリーン座標で判定）
-		if event.position.y >= 420.0:
-			return
-			
-		# --- 戦場（ワールド）の実際のクリック座標を取得 ---
-		var world_pos = get_global_mouse_position()
-		var clicked_unit = _find_unit_at(world_pos)
-		
-		# --- ステップ1: べつの自軍ユニットをクリックした場合は、選択をそちらに切り替える ---
-		if clicked_unit != null and clicked_unit.team == BaseUnit.Team.PLAYER and clicked_unit.unit_name != selected_unit_name:
-			_select_unit_type(clicked_unit.unit_name)
-			return
-			
-		# --- ステップ2: 既に選択中の同種ユニット自身を再クリックした場合は、選択を解除する ---
-		if clicked_unit != null and clicked_unit.team == BaseUnit.Team.PLAYER and clicked_unit.unit_name == selected_unit_name:
-			_deselect_all()
-			return
-			
-		# --- ステップ3: 地面をクリックした場合はラリーポイント設定 ---
-		if selected_unit_name != "":
-			_set_rally_for_selected(world_pos.x)
-	
-	# 右クリックで選択解除
-	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
-		_deselect_all()
-
-# === クリック位置の近くにいるユニットを探す ===
-func _find_unit_at(pos: Vector2) -> BaseUnit:
-	var best: BaseUnit = null
-	var best_dist: float = 50.0  # 50px以内がクリック範囲
-	for child in units_container.get_children():
-		if child is BaseUnit and child.is_alive and not child.is_ghost:
-			var dist = child.position.distance_to(pos)
-			if dist < best_dist:
-				best_dist = dist
-				best = child
-	return best
-
-# === 指定のユニット種別を全選択 ===
-func _select_unit_type(u_name: String) -> void:
-	selected_unit_name = u_name
-	print("[BattleField] ユニット選択: '%s'" % u_name)
-	
-	var is_controllable = false
-	
-	# 同種のユニットを全てハイライト
-	for child in units_container.get_children():
-		if child is BaseUnit and child.is_alive and child.team == BaseUnit.Team.PLAYER:
-			if child.unit_name == u_name:
-				child.set_selected(true)
-				if child.unit_role != 0: # 突撃兵以外なら操作可能
-					is_controllable = true
-			else:
-				child.set_selected(false)
-				
-	# 操作可能なユニットなら専用UIを表示
-	if selection_ui_container:
-		selection_ui_container.visible = is_controllable
-
-# === 選択解除 ===
-func _deselect_all() -> void:
-	selected_unit_name = ""
-	for child in units_container.get_children():
-		if child is BaseUnit:
-			child.set_selected(false)
-	# ラリー旗を消す
-	if rally_flag and is_instance_valid(rally_flag):
-		rally_flag.queue_free()
-		rally_flag = null
-	# 専用UIを隠す
-	if selection_ui_container:
-		selection_ui_container.visible = false
-
-# === 選択中のユニットにラリーポイントを設定 ===
-func _set_rally_for_selected(x_pos: float) -> void:
-	var is_controllable: bool = false
-	
-	# 新規生成ユニット用にラリーポイントを記憶
-	unit_rally_points[selected_unit_name] = x_pos
-	
-	for child in units_container.get_children():
-		if child is BaseUnit and child.is_alive and child.team == BaseUnit.Team.PLAYER:
-			if child.unit_name == selected_unit_name:
-				# 突撃兵(ASSAULT)は命令無視なのでラリーも無視
-				if child.unit_role != 0:
-					child.set_rally_point(x_pos)
-					is_controllable = true
-	
-	if is_controllable:
-		print("[BattleField] '%s' のラリーポイントを X=%.0f に設定" % [selected_unit_name, x_pos])
-		# ラリー旗の表示
-		_show_rally_flag(x_pos)
-	else:
-		print("[BattleField] '%s' は命令を受け付けません" % selected_unit_name)
-	
-	# 指示を出した後はハイライトを解除する
-	_deselect_all()
-
-# === ラリー旗の表示 ===
-func _show_rally_flag(x_pos: float) -> void:
-	if rally_flag and is_instance_valid(rally_flag):
-		rally_flag.queue_free()
-	
-	rally_flag = ColorRect.new()
-	rally_flag.color = Color(0.2, 1.0, 0.2, 0.6)
-	rally_flag.size = Vector2(4, 30)
-	rally_flag.position = Vector2(x_pos - 2, GROUND_Y - 30)
-	add_child(rally_flag)
-	
-	# 3秒後に自動で消える
-	var tween = rally_flag.create_tween()
-	tween.tween_interval(2.0)
-	tween.tween_property(rally_flag, "modulate:a", 0.0, 1.0)
-	tween.tween_callback(rally_flag.queue_free)
-
-# === 外部からユニット種別を選択する（ロスターUIから呼ばれる） ===
-func select_unit_type_by_name(u_name: String) -> void:
-	if selected_unit_name == u_name:
-		_deselect_all() # 既に選択中なら解除（トグル動作）
-	else:
-		_select_unit_type(u_name)
-
 # === 死亡ユニットの生存数をカウント ===
 func get_alive_count_by_name(u_name: String) -> int:
 	var count: int = 0
@@ -364,8 +211,7 @@ func _setup_deck_manager() -> void:
 	deck_manager.name = "DeckManager"
 	add_child(deck_manager)
 	
-	# サイクル終了時の一斉実体化
-	deck_manager.cycle_ended.connect(_on_cycle_ended)
+
 	# サイクル開始時に敵ゴーストを配置
 	deck_manager.cycle_started.connect(_on_cycle_started)
 	
@@ -383,7 +229,24 @@ func _on_cycle_started(cycle_number: int) -> void:
 		var spawn_x = randf_range(ENEMY_BASE_X - 120.0, ENEMY_BASE_X - 20.0)
 		var unit = spawn_unit(BaseUnit.Team.ENEMY, spawn_x, enemy_stats, true)
 		unit.enemy_base_x = PLAYER_BASE_X
-	print("[BattleField] サイクル%d: 敵%d体をゴースト配置" % [cycle_number, enemies_for_cycle.size()])
+		
+		# --- 敵は1.5秒の「ゴースト状態」を経て進軍開始 ---
+		get_tree().create_timer(1.5).timeout.connect(func():
+			if is_instance_valid(unit) and unit.is_ghost:
+				unit.materialize()
+				# 敵の実体化エフェクト（赤黒いオーラ）
+				var effect = ColorRect.new()
+				effect.size = Vector2(unit.visual_size + 15, unit.visual_size + 15)
+				effect.color = Color(1.0, 0.2, 0.2, 0.4)
+				effect.position = Vector2(-effect.size.x/2, -effect.size.y)
+				unit.add_child(effect)
+				var tw = unit.create_tween()
+				tw.tween_property(effect, "scale", Vector2(1.3, 1.3), 0.3)
+				tw.parallel().tween_property(effect, "modulate:a", 0.0, 0.3)
+				tw.tween_callback(effect.queue_free)
+		)
+		
+	print("[BattleField] サイクル%d: 敵%d体を出撃警告(1.5秒後に進軍)！" % [cycle_number, enemies_for_cycle.size()])
 
 # === サイクル番号に応じた敵の編成を返す ===
 func _get_enemies_for_cycle(cycle_number: int) -> Array[Dictionary]:
@@ -479,111 +342,6 @@ func _get_enemies_for_cycle(cycle_number: int) -> Array[Dictionary]:
 				enemies.append(boss.duplicate())
 	
 	return enemies
-func _on_cycle_ended() -> void:
-	# ゴーストユニットを一斉実体化
-	var ghosts_count = 0
-	for child in units_container.get_children():
-		if child is BaseUnit and child.is_ghost:
-			child.materialize()
-			ghosts_count += 1
-	print("[BattleField] %d体の予約ユニットが一斉に実体化しました！" % ghosts_count)
-	
-	# 遅延スペル（SPELL_CYCLE）を発動
-	for spell_data in _pending_spells:
-		_execute_spell(spell_data["card"], spell_data["target_x"])
-	_pending_spells.clear()
-
-# === _on_phase_changed 等は廃止（削除） ===
-
-# ===================================================
-# チェックポイント城砦システム
-# ===================================================
-
-func _setup_checkpoints() -> void:
-	for i in range(CHECKPOINT_XS.size()):
-		checkpoint_captured.append(false)
-		
-		var cx: float = CHECKPOINT_XS[i]
-		
-		# 城砦自体をHPを持つ「動かない敵ユニット」として生成する
-		# これにより、プレイヤーユニットが通常の索敵・攻撃ロジックを使って城砦を叩けるようになる
-		var fort_stats = {
-			"unit_name": "城砦", "max_hp": CHECKPOINT_HP, "atk": 0.0,
-			"attack_range": 0.0, "speed": 0.0, "attack_interval": 999.0,
-			"visual_size": 40.0, "unit_color": Color(0.7, 0.2, 0.2),
-			"knockback_chance": 0.0, "knockback_power": 0.0, "kb_resistance": 1000.0, # 吹き飛ばない壁
-			"flinch_chance": 0.0, "flinch_duration": 0.0  # ひるまない
-		}
-		
-		var fort_unit = spawn_unit(BaseUnit.Team.ENEMY, cx, fort_stats, true)
-		fort_unit.enemy_base_x = PLAYER_BASE_X # 敵として出撃
-		# （ラベル追加: 🔒）
-		var label = Label.new()
-		label.text = "🔒%d" % (i + 1)
-		label.position = Vector2(-18, -65)
-		label.add_theme_font_size_override("font_size", 14)
-		fort_unit.add_child(label)
-		
-		checkpoint_units.append(fort_unit)
-
-# === 城砦の占領チェック（毎フレーム） ===
-func _update_checkpoints(delta: float) -> void:
-	if battle_ended:
-		return
-	
-	for i in range(CHECKPOINT_XS.size()):
-		if checkpoint_captured[i]:
-			continue
-		
-		var fort: BaseUnit = checkpoint_units[i]
-		
-		# 城砦が破壊（死亡）された＝占領完了
-		if not is_instance_valid(fort) or not fort.is_alive or fort.current_hp <= 0.0:
-			_capture_checkpoint(i)
-			continue
-		
-		var fort_x: float = CHECKPOINT_XS[i]
-		
-		for child in units_container.get_children():
-			if not (child is BaseUnit) or not child.is_alive or child.is_ghost or child.team != BaseUnit.Team.PLAYER:
-				continue
-			
-			# 城砦の裏側を目標にしている敵に近づくのを防ぐ（壁としての役割）
-			# 実体のある城砦ユニットを攻撃していない場合でも、壁を超えられないようにする
-			if not child.is_flying and child.position.x >= fort_x - 30.0:
-				child.position.x = fort_x - 30.0
-
-# === 城砦占領処理 ===
-func _capture_checkpoint(index: int) -> void:
-	checkpoint_captured[index] = true
-	
-	# 城砦跡地（青色の旗）を立てる
-	var fort_x = CHECKPOINT_XS[index]
-	var claim_flag = Label.new()
-	claim_flag.text = "🚩"  # 占領フラッグ
-	claim_flag.add_theme_font_size_override("font_size", 36)
-	claim_flag.position = Vector2(fort_x - 25, GROUND_Y - 50)
-	add_child(claim_flag)
-	
-	# 占領済み数に応じて配置可能エリアを拡大
-	# 城砦の「少し手前」まで配置できるように設定
-	match index:
-		0: player_deploy_limit_x = 500.0   # 1城目占領 → 前線基地付近まで
-		1: player_deploy_limit_x = 780.0   # 2城目占領 → 敵陣に深く入れる
-		2: player_deploy_limit_x = 1050.0  # 3城目占領 → 敵拠点まで迫れる
-	
-	print("[BattleField] 🏰 城砦%d 占領！配置可能範囲 → %.0fpxまで" % [index + 1, player_deploy_limit_x])
-	
-	# UILayerに新しい配置上限を通知
-	var main_node = get_parent()
-	if main_node:
-		var ui_layer = main_node.get_node_or_null("UILayer/UIRoot")
-		if ui_layer and ui_layer.has_method("set_deploy_limit"):
-			ui_layer.set_deploy_limit(player_deploy_limit_x)
-	
-	# 配置ゾーンのビジュアルも更新
-	_refresh_deploy_zone_visual()
-
 # ===================================================
 # 配置ゾーン・地面ビジュアル
 # ===================================================
@@ -692,17 +450,6 @@ func _deferred_connect_ui() -> void:
 			ui_layer.set_battlefield_ref(self)
 		print("[BattleField] UILayerとの接続完了")
 
-# === 全軍指揮（現在フィールドにいる味方に命令を出す単発トリガー） ===
-func order_all_player_units(advance: bool) -> void:
-	if advance:
-		print("[BattleField] ⚔ 現在の全軍に突撃命令を発行しました！")
-	else:
-		print("[BattleField] 🔙 現在の全軍に後退・待機命令を発行しました！")
-	
-	for child in units_container.get_children():
-		if child is BaseUnit and child.team == BaseUnit.Team.PLAYER and child.is_alive:
-			if child.has_method("order_command"):
-				child.order_command(advance)
 
 # === デッキを取得（GameManagerがあればそこから、無ければテスト用を生成） ===
 func _create_test_deck() -> Array[CardData]:
@@ -753,17 +500,32 @@ func request_use_card(hand_index: int, target_pos_x: float) -> void:
 		# カード種別に応じた処理を分岐
 		match card.card_type:
 			CardData.CardType.UNIT:
-				# ユニットカード → summon_count分のゴーストを配置予約
 				var count = card.summon_count
-				print("[BattleField] ユニット '%s' ×%d を位置 %.0f に予約！" % [card.card_name, count, target_pos_x])
+				print("[BattleField] ユニット '%s' ×%d を位置 %.0f に配置！(1秒後に実体化)" % [card.card_name, count, target_pos_x])
 				for i in range(count):
-					# 複数体は少しずつX位置をバラけさせる（重なり防止）
 					var offset_x = 0.0
 					if count > 1:
 						offset_x = (i - (count - 1) / 2.0) * 25.0  # 中心から±25pxずつ散開
 					var spawn_x = clampf(target_pos_x + offset_x, PLAYER_BASE_X, 640.0)
 					var unit = spawn_unit(BaseUnit.Team.PLAYER, spawn_x, card.get_unit_stats(), true)
 					unit.enemy_base_x = ENEMY_BASE_X
+					
+					# --- 1秒間の待機後に実体化 ---
+					# ゴーストとして配置し、1秒後に materialize() を呼ぶ
+					get_tree().create_timer(1.0).timeout.connect(func():
+						if is_instance_valid(unit) and unit.is_ghost:
+							unit.materialize()
+							# ちょっとしたエフェクト
+							var effect = ColorRect.new()
+							effect.size = Vector2(unit.visual_size + 10, unit.visual_size + 10)
+							effect.color = Color(0.8, 1.0, 1.0, 0.4)
+							effect.position = Vector2(-effect.size.x/2, -effect.size.y)
+							unit.add_child(effect)
+							var tw = unit.create_tween()
+							tw.tween_property(effect, "scale", Vector2(1.5, 1.5), 0.3)
+							tw.parallel().tween_property(effect, "modulate:a", 0.0, 0.3)
+							tw.tween_callback(effect.queue_free)
+					)
 			
 			CardData.CardType.SPELL_INSTANT:
 				# 即時スペル → ドロップした瞬間に効果発動！
@@ -771,9 +533,11 @@ func request_use_card(hand_index: int, target_pos_x: float) -> void:
 				_execute_spell(card, target_pos_x)
 			
 			CardData.CardType.SPELL_CYCLE:
-				# 遅延スペル → サイクル終了時に発動（予約だけしておく）
-				print("[BattleField] 🕐 スペル '%s' をサイクル終了時に発動予約" % card.card_name)
-				_pending_spells.append({"card": card, "target_x": target_pos_x})
+				# 遅延スペル → 1秒後に発動
+				print("[BattleField] 🕐 スペル '%s' を1秒後に発動" % card.card_name)
+				get_tree().create_timer(1.0).timeout.connect(func():
+					_execute_spell(card, target_pos_x)
+				)
 
 # === スペルカードの効果を実行する ===
 func _execute_spell(card: CardData, target_x: float) -> void:
@@ -832,7 +596,7 @@ func _on_enemy_spawn_requested(enemy_stats: Dictionary) -> void:
 func spawn_unit(team: BaseUnit.Team, spawn_x: float, stats: Dictionary = {}, is_ghost: bool = false) -> BaseUnit:
 	var unit := BaseUnit.new()
 	unit.team = team
-	unit.battlefield_ref = self # BattleFieldの参照を持たせる（コマンド確認用）
+
 	
 	# ステータスの上書き
 	if stats.has("unit_role"): unit.unit_role = stats["unit_role"]
@@ -881,13 +645,6 @@ func spawn_unit(team: BaseUnit.Team, spawn_x: float, stats: Dictionary = {}, is_
 	if GameManager != null:
 		if team == BaseUnit.Team.PLAYER and "mask_of_swiftness" in GameManager.player_relics:
 			unit.speed *= 1.2 # 味方全員の移動速度+20%
-	
-	# --- 新規生成ユニットへの「ラリーポイント」と「選択状態」の引き継ぎ ---
-	if team == BaseUnit.Team.PLAYER:
-		if unit_rally_points.has(unit.unit_name):
-			unit.set_rally_point(unit_rally_points[unit.unit_name])
-		if unit.unit_name == selected_unit_name:
-			unit.set_selected(true)
 	
 	# シグナルを接続
 	unit.unit_died.connect(_on_unit_died)
@@ -970,60 +727,6 @@ func _on_wave_changed(wave_num: int, total: int) -> void:
 			var deck_size: int = deck_manager.draw_pile.size() if deck_manager else 0
 			var discard_size: int = deck_manager.discard_pile.size() if deck_manager else 0
 			ui_root._update_debug_info(deck_size, discard_size, wave_num)
-
-# === 選択時専用UIの作成 ===
-func _create_selection_ui() -> void:
-	selection_ui_canvas = CanvasLayer.new()
-	selection_ui_canvas.layer = 5 # UILayer(10)より下、戦場より上
-	add_child(selection_ui_canvas)
-	
-	selection_ui_container = HBoxContainer.new()
-	# 画面上部の中央付近に配置
-	selection_ui_container.set_anchors_preset(Control.PRESET_TOP_WIDE)
-	selection_ui_container.position = Vector2(0, 20)
-	selection_ui_container.alignment = BoxContainer.ALIGNMENT_CENTER
-	selection_ui_container.add_theme_constant_override("separation", 100)
-	selection_ui_container.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	selection_ui_canvas.add_child(selection_ui_container)
-	
-	# 後退ボタン
-	var btn_back = Button.new()
-	btn_back.text = "◀ 後退"
-	btn_back.custom_minimum_size = Vector2(160, 60)
-	btn_back.add_theme_font_size_override("font_size", 28)
-	btn_back.pressed.connect(_on_selection_back_pressed)
-	var style_back = StyleBoxFlat.new()
-	style_back.bg_color = Color(0.2, 0.4, 0.8, 0.9)
-	style_back.set_corner_radius_all(8)
-	btn_back.add_theme_stylebox_override("normal", style_back)
-	btn_back.add_theme_stylebox_override("hover", style_back.duplicate())
-	selection_ui_container.add_child(btn_back)
-	
-	# 突撃ボタン
-	var btn_fwd = Button.new()
-	btn_fwd.text = "突撃 ▶"
-	btn_fwd.custom_minimum_size = Vector2(160, 60)
-	btn_fwd.add_theme_font_size_override("font_size", 28)
-	btn_fwd.pressed.connect(_on_selection_fwd_pressed)
-	var style_fwd = StyleBoxFlat.new()
-	style_fwd.bg_color = Color(0.8, 0.3, 0.2, 0.9)
-	style_fwd.set_corner_radius_all(8)
-	btn_fwd.add_theme_stylebox_override("normal", style_fwd)
-	btn_fwd.add_theme_stylebox_override("hover", style_fwd.duplicate())
-	selection_ui_container.add_child(btn_fwd)
-	
-	selection_ui_container.visible = false
-
-# === 選択時UIのボタン処理 ===
-func _on_selection_back_pressed() -> void:
-	if selected_unit_name != "":
-		# 自陣拠点の少し前まで一気に下げる
-		_set_rally_for_selected(PLAYER_BASE_X + 60.0)
-
-func _on_selection_fwd_pressed() -> void:
-	if selected_unit_name != "":
-		# 敵陣拠点の奥深くまで進ませる（実質的な突撃）
-		_set_rally_for_selected(ENEMY_BASE_X - 10.0)
 
 # === 全ウェーブ完了 ===
 func _on_all_waves_completed() -> void:

@@ -184,17 +184,7 @@ func _create_mana_ui() -> void:
 	cycle_timer_label.position = Vector2(800, 440)
 	add_child(cycle_timer_label)
 
-	# --- 引き直しボタン（1マナ） ---
-	var redraw_btn = Button.new()
-	redraw_btn.text = "🔄 引き直し\n(1マナ消費)"
-	redraw_btn.position = Vector2(1050, 435)
-	redraw_btn.custom_minimum_size = Vector2(120, 50)
-	redraw_btn.add_theme_font_size_override("font_size", 14)
-	redraw_btn.pressed.connect(func():
-		if deck_manager:
-			deck_manager.redraw_hand()
-	)
-	add_child(redraw_btn)
+	# 引き直しボタンは廃止されました
 
 # === マナ変化時 ===
 func _on_mana_changed(current: int, max_val: int) -> void:

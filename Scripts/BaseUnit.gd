@@ -74,21 +74,6 @@ var base_y: float = 0.0
 # 個体ごとの速度ゆらぎを持たせるための実際の速度
 var actual_speed: float = 0.0
 
-# === 全軍指揮の個別状態 ===
-# デフォルトはfalse（待機・後退）。突撃命令を受けるとtrueになる。
-var is_advancing: bool = false
-# BattleFieldへの参照（待機/後退ロジックなどで使用）
-var battlefield_ref = null
-
-# === ラリーポイント（指定地点待機） ===
-# -1.0 = 未設定（デフォルトのロール別ラインを使う）
-# 0以上 = 指定された座標へ移動して待機する
-var rally_x: float = -1.0
-
-# === 選択ハイライト ===
-var is_selected: bool = false
-var highlight_rect: ColorRect = null
-
 # === 拠点到達の境界座標 ===
 # BattleFieldから設定される。この座標を超えたら拠点に到達とみなす
 var enemy_base_x: float = INF
@@ -116,8 +101,6 @@ func _ready() -> void:
 	_create_temp_sprite()
 	# HPバーの作成
 	_create_hp_bar()
-	# 選択ハイライト枠の作成
-	_create_highlight()
 
 func _process(delta: float) -> void:
 	if not is_alive or is_ghost:
@@ -168,23 +151,8 @@ func _do_move(delta: float) -> void:
 		if dist_x < 15.0: # 15px以内なら物理的にぶつかっていると判定して立ち止まる
 			return
 	
-	# --- 待機/後退コマンド時の移動制御 ---
-	# 自軍ユニットかつ、アサルト(0)以外の場合
+	# 前進し続ける
 	var current_move_dir: float = move_direction
-	if team == Team.PLAYER and unit_role != 0:
-		if not is_advancing: # 待機・後退状態
-			# ラリーポイントが設定されていればそこへ、未設定ならロール別デフォルトラインへ
-			var stop_x: float = rally_x if rally_x >= 0.0 else _get_defend_line_x()
-			# 許容誤差±5px
-			if position.x > stop_x + 5.0:
-				# ラインより進みすぎている → 自陣へ逃げ帰る（左へ）
-				current_move_dir = -1.0
-			elif position.x < stop_x - 5.0:
-				# ラインより手前 → 前進する（右へ）
-				current_move_dir = 1.0
-			else:
-				# ライン上にいる → 立ち止まる
-				return
 	
 	# 実際の速度（ゆらぎ込み）×方向で更新
 	position.x += actual_speed * current_move_dir * delta
@@ -220,46 +188,6 @@ func _do_attack_base(delta: float) -> void:
 		
 		# 拠点へダメージを与える
 		attacked_base.emit(self, atk)
-
-# === 全軍指揮命令を受け取る ===
-func order_command(advance: bool) -> void:
-	if unit_role == 0:
-		return # アサルト(突撃兵)は命令を無視して常に前進する
-	is_advancing = advance
-
-# === ユニット種別のラリーポイントを設定 ===
-func set_rally_point(x_pos: float) -> void:
-	if unit_role == 0:
-		return # 突撃兵は命令無視
-	rally_x = x_pos
-	# ラリーポイントが設定されたら突撃状態を解除（待機に戻す）
-	is_advancing = false
-
-# === 選択ハイライトの切り替え ===
-func set_selected(selected: bool) -> void:
-	is_selected = selected
-	if highlight_rect:
-		highlight_rect.visible = selected
-
-# === 選択ハイライト枠の作成 ===
-func _create_highlight() -> void:
-	highlight_rect = ColorRect.new()
-	highlight_rect.name = "Highlight"
-	highlight_rect.color = Color(1.0, 1.0, 1.0, 0.3)
-	highlight_rect.size = Vector2(visual_size + 8, visual_size + 8)
-	highlight_rect.position = Vector2(-(visual_size + 8) / 2.0, -visual_size - 4)
-	highlight_rect.visible = false
-	highlight_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(highlight_rect)
-
-# === ロールに応じた防衛ラインX座標を取得 ===
-func _get_defend_line_x() -> float:
-	# 自陣拠点(X=70)からどれくらい進んだ位置に待機するか
-	match unit_role:
-		1: return 350.0 # TANK: 一番前（前衛の壁）
-		2: return 280.0 # FIGHTER: TANKの少し後ろ（近接主力）
-		3: return 200.0 # SHOOTER: 自陣拠点に近い後方（遠距離支援）
-		_: return 300.0
 
 # === 味方同士のめり込みを防ぐソフトコリジョン ===
 # 物理エンジンを使わず、近くの味方から軽く反発力を受けることで群れを散らす
@@ -689,13 +617,16 @@ func _is_in_range(target: BaseUnit) -> bool:
 # === ユニット名から絵文字を取得 ===
 func _get_unit_emoji() -> String:
 	match unit_name:
-		"城砦": return "🏰"
+
 		"盾兵": return "🛡"
 		"双剣兵": return "⚔"
 		"弓兵": return "🏹"
 		"狂気兵": return "💀"
 		"爆弾兵": return "💣"
 		"鷹騎兵": return "🦅"
+		"騎兵": return "🐎"
+		"魔術師": return "🔮"
+		"暗殺者": return "🗡"
 		"ゴブリン": return "👹"
 		"ゴブリン弓": return "🏹"
 		"オーク盾": return "🪨"
@@ -874,5 +805,3 @@ func materialize() -> void:
 		hp_bar_bg.visible = true
 	if hp_bar_fill:
 		hp_bar_fill.visible = true
-	# 実体化した時は常に前進状態にする（全軍突撃ボタンを廃止したため）
-	is_advancing = true
