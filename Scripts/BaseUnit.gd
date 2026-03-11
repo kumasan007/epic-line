@@ -65,6 +65,7 @@ var original_attack_interval: float = 1.0
 var battle_ended: bool = false
 var is_alive: bool = true          # 生存フラグ
 var is_ghost: bool = false        # ゴースト（出撃待機）状態フラグ
+var is_flying: bool = false       # 飛行ユニット（地上近接から攻撃されない）
 var lifespan_timer: float = 0.0    # 寿命タイマー
 var local_hit_stop_timer: float = 0.0 # 個別ヒットストップ（Stun/硬直）
 
@@ -139,10 +140,11 @@ func _process(delta: float) -> void:
 	# --- ターゲット検索 ---
 	# 現在の攻撃対象が無効、あるいは射程外なら、より近いターゲットを探す
 	var dist_to_target = INF
-	if current_target != null and is_instance_valid(current_target) and current_target.is_alive:
+	# ゴーストは「存在しない」ものとして扱う（ターゲット対象外）
+	if current_target != null and is_instance_valid(current_target) and current_target.is_alive and not current_target.is_ghost:
 		dist_to_target = abs(current_target.position.x - position.x)
 	
-	if current_target == null or not is_instance_valid(current_target) or not current_target.is_alive or dist_to_target > attack_range:
+	if current_target == null or not is_instance_valid(current_target) or not current_target.is_alive or current_target.is_ghost or dist_to_target > attack_range:
 		var nearest = _find_nearest_enemy()
 		if nearest != null:
 			current_target = nearest
@@ -270,7 +272,7 @@ func _apply_soft_collision(delta: float) -> void:
 	var neighbor_count: int = 0
 	
 	for child in units_parent.get_children():
-		if child is BaseUnit and child != self and child.team == team and child.is_alive:
+		if child is BaseUnit and child != self and child.team == team and child.is_alive and not child.is_ghost:
 			var diff = position - child.position
 			var sqr_dist = diff.length_squared()
 			# 半径25px(平方距離 625)以内なら反発を計算
@@ -628,30 +630,77 @@ func _on_lifespan_expired() -> void:
 	# 寿命を迎えた際も破壊と同じ扱い（爆発効果などを発動）として_dieを処理させる
 	_die()
 
-# === 最も近い敵を探す ===
+# === 最前線の敵を探す ===
+# 「最も近い敵」ではなく「最も自陣に侵入している（最前線の）敵」を優先ターゲットにする。
+# - プレイヤーチーム: X座標が最も小さい敵（自陣に最も近い）
+# - 敵チーム: X座標が最も大きい味方（敵陣に最も深く入り込んだ）
+# これにより全ユニットが同じ「最脅威」に集中し、タンクを先に処理できる。
+# ただし射程内に誰かいる場合は、射程内の中から最前線を選ぶ。
 func _find_nearest_enemy() -> BaseUnit:
-	# 親の"Units"ノードから全ユニットを取得
 	var units_parent = get_parent()
 	if units_parent == null:
 		return null
 	
-	var nearest: BaseUnit = null
-	var nearest_dist: float = INF
+	var best_in_range: BaseUnit = null   # 射程内で最前線
+	var best_global: BaseUnit = null     # 射程外含む全体で最前線
+	
+	# プレイヤーは「最も左（X小）の敵」が最前線
+	# 敵は「最も右（X大）の味方」が最前線
+	var best_in_range_x: float  = INF if team == Team.PLAYER else -INF
+	var best_global_x: float    = INF if team == Team.PLAYER else -INF
 	
 	for child in units_parent.get_children():
-		if child is BaseUnit and child != self and child.is_alive:
-			# 自分と違うチームのユニットだけを対象にする
-			if child.team != team:
-				var dist: float = abs(child.position.x - position.x)
-				if dist < nearest_dist:
-					nearest_dist = dist
-					nearest = child
+		if not (child is BaseUnit) or child == self or not child.is_alive or child.is_ghost:
+			continue
+		if child.team == team:
+			continue  # 同チームはスキップ
+		
+		# 飛行ユニットは地上近接から攻撃できない
+		if child.is_flying and not is_ranged and not is_flying:
+			continue
+		
+		var child_x: float = child.position.x
+		var in_range: bool = _is_in_range(child)
+		
+		if team == Team.PLAYER:
+			# プレイヤー: X が小さいほど最前線（自陣に近い）
+			if in_range and child_x < best_in_range_x:
+				best_in_range_x = child_x
+				best_in_range = child
+			if child_x < best_global_x:
+				best_global_x = child_x
+				best_global = child
+		else:
+			# 敵チーム: X が大きいほど最前線（敵陣に近い）
+			if in_range and child_x > best_in_range_x:
+				best_in_range_x = child_x
+				best_in_range = child
+			if child_x > best_global_x:
+				best_global_x = child_x
+				best_global = child
 	
-	return nearest
+	# 射程内に誰かいればその中の最前線を。いなければ全体の最前線に向かって歩く。
+	return best_in_range if best_in_range != null else best_global
 
 # === 射程内かどうか判定 ===
 func _is_in_range(target: BaseUnit) -> bool:
 	return abs(target.position.x - position.x) <= attack_range
+
+# === ユニット名から絵文字を取得 ===
+func _get_unit_emoji() -> String:
+	match unit_name:
+		"城砦": return "🏰"
+		"盾兵": return "🛡"
+		"双剣兵": return "⚔"
+		"弓兵": return "🏹"
+		"狂気兵": return "💀"
+		"爆弾兵": return "💣"
+		"鷹騎兵": return "🦅"
+		"ゴブリン": return "👹"
+		"ゴブリン弓": return "🏹"
+		"オーク盾": return "🪨"
+		"オーク狂戦士": return "🔥"
+	return "⚔"
 
 # === 仮スプライト作成 ===
 func _create_temp_sprite() -> void:
@@ -671,6 +720,16 @@ func _create_temp_sprite() -> void:
 			rect.color = Color(1.0, 0.3, 0.3) # デフォルト赤
 			
 	add_child(rect)
+	sprite_rect = rect
+	
+	# === 絵文字アイコンを重ねて「キャラ」にする ===
+	var icon_label := Label.new()
+	icon_label.name = "UnitIcon"
+	icon_label.text = _get_unit_emoji()
+	icon_label.add_theme_font_size_override("font_size", int(visual_size * 0.7))
+	icon_label.position = Vector2(-visual_size * 0.35, -visual_size * 0.9)
+	icon_label.z_index = 1
+	add_child(icon_label)
 	
 	# 強化済みならオーラを付ける
 	if is_upgraded:

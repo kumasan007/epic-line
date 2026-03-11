@@ -35,134 +35,207 @@ func init_new_run() -> void:
 func _generate_initial_deck() -> void:
     player_deck.clear()
     
-    # --- 巨盾兵（スーパータンク） × 1 ---
-    # 特徴：絶望的に足が遅く、攻撃も信じられないほど遅いが、HPが異常に高く、一撃のノックバックが強烈。
-    for i in range(1):
+    # ============================================================
+    # 設計思想: 「高いやつ出せば勝ち」を絶対に許さないバランス
+    # - どのユニットも単体では致命的な弱点がある
+    # - 「壁＋火力」「数＋足止め」のコンボで初めて強くなる
+    # - 5マナの使い方に複数の正解がある
+    # ============================================================
+    
+    # --- 盾兵（壁）× 2 ---
+    # 役割: 前衛に立つ壁。HPは高いが攻撃力はほぼゼロ。
+    # 弱点: 一人では敵を倒せない。火力ユニットが後ろにいないと意味がない。
+    # コンボ: 盾兵(2) + 弓兵(2) + 狂気兵(1) = 鉄壁の布陣
+    for i in range(2):
         var c := CardData.new()
-        c.card_name = "巨盾兵"
-        c.unit_role = CardData.UnitRole.TANK # 前衛の壁
-        c.cooldown = 10.0    # 生産が超遅い（重量ユニット）
-        c.mana_cost = 4     # 重い！マナのほとんどを消費する
-        c.charge_count = 2   # 2体しか出せないが、その分硬い
-        c.unit_name = "巨盾兵"
-        c.max_hp = 3000.0       # 超絶硬い (壁)
-        c.atk = 40.0           # 一撃は重い
-        c.attack_range = 45.0
-        c.defense = 10.0
-        c.speed = 12.0         # めちゃくちゃ遅い、ジリジリ進む
-        c.attack_interval = 4.0 # 攻撃がスゲェ遅い（ドスーン！という感じ）
-        c.attack_windup_time = 1.5 # 1.5秒かけて大きく振りかぶる！（超重厚）
-        c.knockback_chance = 100.0 # 攻撃したら絶対吹き飛ばす
-        c.knockback_power = 90.0
-        c.kb_resistance = 80.0 # ほとんど吹き飛ばされない
-        c.flinch_chance = 50.0; c.flinch_duration = 0.5
+        c.card_name = "盾兵"
+        c.description = "HP高・攻撃力ゼロ。壁役。弓兵を守れ"
+        c.unit_role = CardData.UnitRole.TANK
+        c.mana_cost = 2         # 安い壁。パーツとして使う
+        c.summon_count = 1      # 単体で壁を張る
+        c.unit_name = "盾兵"
+        c.max_hp = 600.0        # 硬いが無敵ではない（ゴブリン3体で約30秒で倒れる）
+        c.atk = 3.0             # 攻撃力ほぼゼロ！壁でしかない
+        c.attack_range = 40.0
+        c.defense = 5.0
+        c.speed = 18.0          # 遅い
+        c.attack_interval = 3.0
+        c.attack_windup_time = 1.0
+        c.knockback_chance = 80.0
+        c.knockback_power = 50.0
+        c.kb_resistance = 70.0  # 吹き飛ばされにくい
         
-        # 見た目のハクスラ感（巨大・重装甲色）
-        c.visual_size = 65.0 # 他の倍以上デカい
-        c.unit_color = Color(0.4, 0.45, 0.5) # スレートグレー
+        c.visual_size = 50.0
+        c.unit_color = Color(0.4, 0.45, 0.55)
         
         player_deck.append(c)
-        
-    # --- 双剣兵（ラッシュアタッカー） × 2 ---
-    # 特徴：HPは紙で射程も短いが、移動速度が速く、攻撃速度が異常（シュバッ！と連続で斬る）。
-    for i in range(2):
+    
+    # --- 双剣兵（近接DPS）× 3 ---
+    # 役割: タンクの後ろから連撃。DPSの要。
+    # 弱点: HPが低い。壁がないと前に出され即死する。
+    # コンボ: 盾兵(2) + 双剣兵(2) = 壁の後ろで暴れるDPSコンボ（計4マナ）
+    for i in range(3):
         var c := CardData.new()
         c.card_name = "双剣兵"
-        c.unit_role = CardData.UnitRole.FIGHTER # 中衛（前衛の後ろからラッシュ）
-        c.cooldown = 4.0
-        c.mana_cost = 2      # 安い！複数並べやすい
-        c.charge_count = 5   # 軽量ユニットなのでチャージ多め
+        c.description = "連撃が強力。壁が無いと即溶け"
+        c.unit_role = CardData.UnitRole.FIGHTER
+        c.mana_cost = 2
+        c.summon_count = 2      # 2体ペアで召喚！連撃コンビ
         c.unit_name = "双剣兵"
-        c.max_hp = 180.0        # スグ死ぬが前よりは耐える
-        c.atk = 8.0            # 一発は軽い
+        c.max_hp = 120.0        # 紙。盾がなければすぐ死ぬ
+        c.atk = 12.0            # 手数で稼ぐ
         c.attack_range = 35.0
-        c.speed = 40.0         # 歩兵の中では速い方だが、全体的には遅く
-        c.attack_interval = 0.5 # 狂った連撃スピード
-        c.attack_windup_time = 0.2 # スパッと斬るためタメは少ない
-        c.kb_resistance = 0.0
+        c.speed = 45.0
+        c.attack_interval = 0.5 # 超連撃（0.5秒ごとに斬る＝DPS24）
+        c.attack_windup_time = 0.15
+        c.kb_resistance = 0.0   # 吹き飛ばされまくる
         
         c.visual_size = 25.0
-        c.unit_color = Color(0.2, 0.8, 1.0) # 水色（スピード感）
+        c.unit_color = Color(0.2, 0.8, 1.0)
         
         player_deck.append(c)
     
-    # --- 長弓兵（スナイパー） × 2 ---
-    # 特徴：超後方から、遅いが一門の大砲のように重い一撃を放つ。
+    # --- 弓兵（遠距離火力）× 2 ---
+    # 役割: 後衛から高火力狙撃。ひるみ付きで敵を足止め。
+    # 弱点: HPが紙。近づかれたら一瞬で死ぬ。壁が必須。
+    # コンボ: 盾兵(2) + 弓兵(2) = 鉄板の「壁＋砲台」。残り1マナで狂気兵追加。
     for i in range(2):
         var c := CardData.new()
-        c.card_name = "長弓兵"
-        c.unit_role = CardData.UnitRole.SHOOTER # ずっと後ろ
-        c.cooldown = 8.0     # 生産が遅い（強力な遠距離）
-        c.mana_cost = 3      # 中コストのメインアタッカー
-        c.charge_count = 3   # 3体まで
-        c.unit_name = "長弓兵"
-        c.max_hp = 150.0
-        c.atk = 60.0           # 一撃の威力が鬼
-        c.attack_range = 350.0 # 画面全体の半分くらい射程がある
-        c.speed = 20.0         # 遅い
-        c.attack_interval = 4.0 # 矢を撃つまでがスゲェ遅い
-        c.attack_windup_time = 2.0 # 弦を2秒間ギチギチと引き絞る！
-        c.knockback_chance = 50.0
-        c.knockback_power = 40.0
-        c.flinch_chance = 100.0; c.flinch_duration = 0.8 # 長弓は確実に重いひるみを与える
+        c.card_name = "弓兵"
+        c.description = "高火力狙撃。近づかれたら即死"
+        c.unit_role = CardData.UnitRole.SHOOTER
+        c.mana_cost = 2
+        c.summon_count = 1      # 単体狙撃手
+        c.unit_name = "弓兵"
+        c.max_hp = 80.0         # ガラスキャノン。近づかれたら終わり
+        c.atk = 45.0            # 一撃が痛い
+        c.attack_range = 350.0
+        c.speed = 15.0
+        c.attack_interval = 3.5
+        c.attack_windup_time = 1.5
+        c.flinch_chance = 100.0; c.flinch_duration = 0.6
+        c.knockback_chance = 40.0
+        c.knockback_power = 30.0
         
-        c.visual_size = 30.0
-        c.unit_color = Color(0.8, 0.5, 0.2) # 茶色よりのオレンジ
+        c.visual_size = 28.0
+        c.unit_color = Color(0.8, 0.5, 0.2)
         c.is_ranged = true
-        c.projectile_speed = 600.0
-        c.projectile_aoe = 35.0 # 着弾するとそこそこ広い範囲が爆発する
+        c.projectile_speed = 500.0
+        c.projectile_aoe = 20.0
         
         player_deck.append(c)
     
-    # --- 狂気兵（鉄砲玉） × 2 ---
-    # 特徴：速めのアタッカーだが、一発もらっただけで死ぬ。Epic War風に速度は落とした。
-    for i in range(2):
+    # --- 狂気兵（使い捨ての囮）× 3 ---
+    # 役割: 1マナで出せる消耗品。数で敵の攻撃を分散させたり、時間稼ぎに。
+    # 弱点: 一撃で死ぬ。
+    # コンボ: 狂気兵(1)×5 = 肉壁ラッシュ。弓兵が後ろにいれば時間稼ぎとして機能。
+    for i in range(3):
         var c := CardData.new()
         c.card_name = "狂気兵"
+        c.description = "1マナ使い捨て。囮や数の暴力に"
         c.unit_role = CardData.UnitRole.ASSAULT
-        c.cooldown = 3.0     # 生産にも少し時間がかかるように
-        c.mana_cost = 1      # 最安！駄駒として繰り出せる
-        c.charge_count = 8   
+        c.mana_cost = 1
+        c.summon_count = 3      # 1マナで3体！コスパ最強の群れ
         c.unit_name = "狂気兵"
-        c.max_hp = 1.0          # 触れられたら即死
-        c.atk = 20.0
+        c.max_hp = 1.0          # 何が当たっても即死
+        c.atk = 15.0
         c.attack_range = 30.0
-        c.speed = 90.0        # EpicWarテンポなら90でも十分疾走感がある（元180は速すぎた）
-        c.attack_interval = 0.5
-        c.attack_windup_time = 0.1 # タメなしで飛び掛かる
+        c.speed = 85.0
+        c.attack_interval = 0.6
+        c.attack_windup_time = 0.1
         
-        c.visual_size = 22.0
+        c.visual_size = 20.0
         c.unit_color = Color(0.9, 0.1, 0.3)
         
         player_deck.append(c)
     
-    # --- 爆弾兵 × 1 ---
-    # 特徴：今まで通りだが、寿命が極端に短いかわりに爆発特化。
+    # --- 爆弾兵（一発逆転）× 1 ---
+    # 役割: 死亡時に大爆発。密集した敵を一掃する切り札。
+    # 弱点: 3マナと高コスト。道中で死ぬと無駄死に。護衛が必要。
+    # コンボ: 爆弾兵(3) + 狂気兵(1)×2 = 爆弾を敵陣に送り届けるプラン
     var bomb := CardData.new()
     bomb.card_name = "爆弾兵"
-    bomb.unit_role = CardData.UnitRole.ASSAULT # 自爆特攻
-    bomb.cooldown = 12.0     # 重めのCD
-    bomb.mana_cost = 5       # マナを全て使い切る、一発逆転の切り札
-    bomb.charge_count = 1    # たった1体だが特大爆発を持つ
+    bomb.description = "死亡時に大爆発！護衛とセットで"
+    bomb.unit_role = CardData.UnitRole.ASSAULT
+    bomb.mana_cost = 3
+    bomb.summon_count = 1       # 単体の大玉
     bomb.unit_name = "爆弾兵"
-    bomb.max_hp = 150.0
+    bomb.max_hp = 100.0         # 脆い。護衛が必要
     bomb.atk = 1.0
     bomb.attack_range = 10.0
-    bomb.speed = 70.0
-    bomb.attack_windup_time = 0.0 # 爆発にタメは無い
-    bomb.lifespan = 8.0        # 勝手に起爆するまでの時間
+    bomb.speed = 55.0
+    bomb.attack_windup_time = 0.0
+    bomb.lifespan = 10.0
     bomb.knockback_chance = 100.0
-    bomb.knockback_power = 150.0 # 爆発ですげー飛ぶ
+    bomb.knockback_power = 120.0
     bomb.knockback_direction = Vector2(0.5, -2.0)
     bomb.flinch_chance = 100.0; bomb.flinch_duration = 1.0
-    bomb.death_effect_type = "explosion" # 死亡時に爆発
-    bomb.death_effect_value = 250.0      # 爆発の特大ダメージ
-    bomb.death_effect_range = 150.0      # 広範囲
+    bomb.death_effect_type = "explosion"
+    bomb.death_effect_value = 200.0
+    bomb.death_effect_range = 130.0
     
-    bomb.visual_size = 30.0
-    bomb.unit_color = Color(1.0, 0.6, 0.2) # 爆発しそうなオレンジ
+    bomb.visual_size = 28.0
+    bomb.unit_color = Color(1.0, 0.5, 0.1)
     
     player_deck.append(bomb)
+    
+    # --- 鷹騎兵（飛行ユニット）× 1 ---
+    # 役割: 空を飛び、地上近接ユニットを無視して敵の弓兵や後衛を狩る。
+    # 弱点: HPが低い。敵の弓兵に撃ち落とされる。
+    # コンボ: 盾兵(2)で前線を持たせつつ、鷹騎兵(2)が後方の弓兵を排除
+    var hawk := CardData.new()
+    hawk.card_name = "鷹騎兵"
+    hawk.description = "飛行。地上近接の攻撃を無視"
+    hawk.unit_role = CardData.UnitRole.FIGHTER
+    hawk.mana_cost = 2
+    hawk.summon_count = 1
+    hawk.unit_name = "鷹騎兵"
+    hawk.max_hp = 90.0          # 弓で落ちる脆さ
+    hawk.atk = 20.0             # そこそこの攻撃力
+    hawk.attack_range = 35.0
+    hawk.speed = 65.0           # 高速移動
+    hawk.attack_interval = 1.2
+    hawk.attack_windup_time = 0.3
+    hawk.is_flying = true       # ★飛行！地上近接から攻撃されない
+    
+    hawk.visual_size = 22.0
+    hawk.unit_color = Color(0.9, 0.85, 0.4)  # 金色
+    
+    player_deck.append(hawk)
+    
+    # --- 火球（即時スペル） × 2 ---
+    # 特徴：指定位置周辺の敵にAoEダメージ。前線が崩壊しそうな時の緊急手段。
+    for i in range(2):
+        var fireball := CardData.new()
+        fireball.card_name = "火球"
+        fireball.card_type = CardData.CardType.SPELL_INSTANT
+        fireball.place_zone = CardData.PlaceZone.ANYWHERE  # スペルはどこでも撃てる
+        fireball.mana_cost = 2
+        fireball.description = "指定地点の敵に30ダメージ (範囲100)"
+        fireball.spell_effect = "damage_aoe"
+        fireball.spell_value = 30.0
+        fireball.spell_range = 100.0
+        fireball.spell_color = Color(1.0, 0.4, 0.1)  # 炎のオレンジ
+        fireball.visual_size = 0.0  # ユニットではないので0
+        fireball.unit_color = Color(1.0, 0.4, 0.1)
+        player_deck.append(fireball)
+    
+    # --- 回復（即時スペル） × 2 ---
+    # 特徴：味方全体のHPを回復。タンクを延命して次の援軍到着まで持たせる。
+    for i in range(2):
+        var heal := CardData.new()
+        heal.card_name = "回復の祈り"
+        heal.card_type = CardData.CardType.SPELL_INSTANT
+        heal.place_zone = CardData.PlaceZone.ANYWHERE  # 回復はどこでもOK
+        heal.mana_cost = 1
+        heal.description = "味方全体のHPを40回復"
+        heal.spell_effect = "heal_all"
+        heal.spell_value = 40.0
+        heal.spell_range = 0.0  # 全体効果なので範囲不要
+        heal.spell_color = Color(0.3, 1.0, 0.5)  # 回復の緑
+        heal.visual_size = 0.0
+        heal.unit_color = Color(0.3, 1.0, 0.5)
+        player_deck.append(heal)
 
 func _generate_map() -> void:
     # 簡単な一本道マップを生成（途中にイベントマスを追加）

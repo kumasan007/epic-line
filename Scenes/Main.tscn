@@ -81,16 +81,6 @@ anchor_right = 1.0
 anchor_bottom = 0.603
 color = Color(0.6, 0.5, 0.3, 1)
 
-; ロスターコンテナ（全所有ユニットのアイコン・生存数表示）
-[node name="RosterContainer" type="HBoxContainer" parent="UILayer/UIRoot"]
-layout_mode = 1
-anchors_preset = -1
-anchor_left = 0.05
-anchor_top = 0.61
-anchor_right = 0.95
-anchor_bottom = 0.69
-theme_override_constants/separation = 15
-alignment = 1
 
 ; 手札カードコンテナ（HBoxContainerで横並び）
 [node name="HandContainer" type="HBoxContainer" parent="UILayer/UIRoot"]
@@ -103,14 +93,3 @@ anchor_bottom = 0.94
 theme_override_constants/separation = 12
 alignment = 1
 
-; デバッグ用ステータスラベル
-[node name="DebugLabel" type="Label" parent="UILayer/UIRoot"]
-layout_mode = 1
-anchors_preset = -1
-anchor_left = 0.02
-anchor_top = 0.94
-anchor_right = 0.98
-anchor_bottom = 0.99
-text = "デッキ: -- | 捨て札: -- | ウェーブ: --"
-horizontal_alignment = 1
-vertical_alignment = 1

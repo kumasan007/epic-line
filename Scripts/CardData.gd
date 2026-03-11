@@ -1,26 +1,45 @@
 # CardData.gd
 # カード1枚分のデータ定義（Resource型）
-# なぜResource？→ Godotエディタ上で視覚的に編集でき、.tres/.resファイルとして保存可能
-# カードはユニットを召喚するための「設計図」のようなもの
+# ユニット召喚カードとスペルカードの両方を表現できる
+# card_typeで種別を切り替える
 extends Resource
 class_name CardData
+
+# === カードの種別 ===
+enum CardType {
+	UNIT,
+	SPELL_INSTANT,
+	SPELL_CYCLE
+}
+
+# === 配置可能ゾーン ===
+# カードをドロップできるエリアを制限する
+# ALLY_SIDE: 自陣側（マップ左半分）のみ
+# ENEMY_SIDE: 敵陣側（マップ右半分）のみ
+# ANYWHERE: 戦場のどこにでも置ける
+enum PlaceZone {
+	ALLY_SIDE,
+	ENEMY_SIDE,
+	ANYWHERE
+}
 
 # === カードの基本情報 ===
 @export var card_name: String = "Unknown Card"
 @export_multiline var description: String = ""
+@export var card_type: CardType = CardType.UNIT
+@export var place_zone: PlaceZone = PlaceZone.ALLY_SIDE  # デフォルトは自陣側のみ
 
-# === CDとレベル ===
-# CD（クールダウン）= 手札に来てから召喚されるまでの待機時間
-# 企画書：CDの長さがコスト代替として機能する（強いユニット=CDが長い）
-@export var cooldown: float = 3.0      # CD（召喚後の再使用までの待機時間）
+# === コストとレベル ===
 @export var mana_cost: int = 3          # 召喚時に消費するマナ
 @export var card_level: int = 1         # 通常版=1, アップグレード版=2
 
-# === チャージ数（生産上限） ===
-# このカードが手札にある間に何体までユニットを生産できるか。
-# チャージを使い切ると捨て札へ送られ、次のカードが引かれる。
-# 0 = 無制限（消耗しない）
-@export var charge_count: int = 3
+# === 召喚数 ===
+@export var summon_count: int = 1
+
+# === 旧システムとの互換性（削除予定） ===
+# 旧チャージ・CD制の名残。.tresファイルや古いコードが参照する場合があるため残す
+@export var cooldown: float = 0.0     # 非推奨（使用しない）
+@export var charge_count: int = 0     # 非推奨（summon_countを使う）
 
 # === ユニットの役割（待機時の陣形に影響） ===
 enum UnitRole {
@@ -39,6 +58,7 @@ enum UnitRole {
 @export var defense: float = 0.0
 @export var speed: float = 80.0
 @export var lifespan: float = 0.0  # 0=無限
+@export var is_flying: bool = false  # 飛行ユニット。地上近接から攻撃されない
 
 @export_group("Attack Properties")
 @export var attack_range: float = 40.0
@@ -69,8 +89,18 @@ enum UnitRole {
 @export var unit_color: Color = Color.WHITE
 
 # === 妨害カードフラグ ===
-# true = このカードは呪いカード（プレイヤーを妨害する）
 @export var is_curse: bool = false
+
+# === スペル効果（card_typeがSPELL系の時に使用） ===
+@export_group("Spell Properties")
+# スペルの効果種別（例: damage_aoe, heal_all, buff_atk 等）
+@export var spell_effect: String = ""  
+# 効果値（ダメージ量、回復量、バフ率 等）
+@export var spell_value: float = 0.0
+# 効果範囲（AoEの場合のradius）
+@export var spell_range: float = 0.0
+# スペルの表示色（カード枠の色分け用）
+@export var spell_color: Color = Color(0.8, 0.4, 1.0)  # デフォルトは紫
 
 # カードからユニット生成用のステータス辞書を作る
 # なぜ辞書？→ BattleField.spawn_unit()が辞書でステータスを受け取る設計のため
@@ -101,5 +131,6 @@ func get_unit_stats() -> Dictionary:
 		"death_effect_range": death_effect_range,
 		"visual_size": visual_size,
 		"unit_color": unit_color,
+		"is_flying": is_flying,
 		"is_upgraded": get("is_upgraded") if get("is_upgraded") != null else false
 	}

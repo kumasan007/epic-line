@@ -25,8 +25,8 @@ var max_hand_size: int = 5      # 毎サイクル引く枚数
 
 # === マナシステム ===
 var current_mana: int = 5       # 現在のマナ
-var max_mana: int = 20          # マナ上限
-var mana_per_cycle: int = 5     # 1サイクルごとのマナ回復量
+var max_mana: int = 5           # マナ上限（=毎サイクルの回復量。持ち越し不可）
+var mana_per_cycle: int = 5     # 1サイクルごとのマナリセット値
 
 # === サイクルシステム ===
 var cycle_duration: float = 20.0 # 1サイクルの秒数
@@ -146,4 +146,18 @@ func try_use_card(hand_index: int) -> bool:
 	
 	# UI更新のために再通知
 	hand_drawn.emit() 
+	return true
+
+# === 1マナ消費して手札を引き直す ===
+func redraw_hand() -> bool:
+	if current_mana < 1:
+		print("[DeckManager] 引き直し失敗: マナ不足")
+		return false
+	
+	current_mana -= 1
+	mana_changed.emit(current_mana, max_mana)
+	
+	print("[DeckManager] 手札を1マナ消費で引き直しました")
+	_discard_hand()
+	_draw_cards(max_hand_size)
 	return true
