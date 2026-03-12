@@ -109,14 +109,19 @@ func _input(event: InputEvent) -> void:
 		if event is InputEventMouseMotion:
 			if dragging_ghost:
 				dragging_ghost.global_position = event.position - dragging_ghost.size / 2
-				# 戦場エリア（Y<420）に入った時のみゾーン判定。UIエリアは常に有効
 				if deck_manager and dragging_slot_index < deck_manager.hand.size():
 					var card = deck_manager.hand[dragging_slot_index]
 					var in_battle_area = event.position.y < 420.0
-					var zone_valid = not in_battle_area or _is_valid_drop_zone(event.position.x, event.position.y, card)
+					# ★ ユニットカードは「拠点固定召喚」なので戦場エリアならどこでも有効
+					# スペルカードはドロップ位置が効果位置になるので従来通りゾーン制限あり
+					var zone_valid: bool
+					if card.card_type == CardData.CardType.UNIT:
+						zone_valid = in_battle_area  # 戦場上(Y<420)ならOK
+					else:
+						zone_valid = not in_battle_area or _is_valid_drop_zone(event.position.x, event.position.y, card)
 					
 					if zone_valid:
-						# 有効: カード果色で半透明表示
+						# 有効: 通常の半透明表示
 						dragging_ghost.modulate = Color(1.0, 1.0, 1.0, 0.55)
 						if drag_invalid_label:
 							drag_invalid_label.visible = false
@@ -132,11 +137,18 @@ func _input(event: InputEvent) -> void:
 						drag_invalid_label.visible = true
 		elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
 			var drop_pos = event.global_position
-			# 戦場エリア（Y < 420）かつゾーン制限をクリアした場合のみ発動
+			# 戦場エリア（Y < 420）へのドロップのみ処理
 			if drop_pos.y < 420.0:
 				if deck_manager and dragging_slot_index < deck_manager.hand.size():
 					var card = deck_manager.hand[dragging_slot_index]
-					if _is_valid_drop_zone(drop_pos.x, drop_pos.y, card):
+					# ★ ユニットカードは戦場エリアならどこでも召喚発動OK（拠点固定なので場所は関係ない）
+					# スペルカードはドロップ位置（target_pos_x）が効果の着弾点になるのでゾーン制限を維持
+					var can_use: bool
+					if card.card_type == CardData.CardType.UNIT:
+						can_use = true
+					else:
+						can_use = _is_valid_drop_zone(drop_pos.x, drop_pos.y, card)
+					if can_use:
 						if battlefield_ref and battlefield_ref.has_method("request_use_card"):
 							battlefield_ref.request_use_card(dragging_slot_index, drop_pos.x)
 			

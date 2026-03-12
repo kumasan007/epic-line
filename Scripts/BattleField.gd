@@ -501,12 +501,14 @@ func request_use_card(hand_index: int, target_pos_x: float) -> void:
 		match card.card_type:
 			CardData.CardType.UNIT:
 				var count = card.summon_count
-				print("[BattleField] ユニット '%s' ×%d を位置 %.0f に配置！(1秒後に実体化)" % [card.card_name, count, target_pos_x])
+				print("[BattleField] ユニット '%s' ×%d を拠点から召喚！(1秒後に実体化)" % [card.card_name, count])
 				for i in range(count):
 					var offset_x = 0.0
 					if count > 1:
 						offset_x = (i - (count - 1) / 2.0) * 25.0  # 中心から±25pxずつ散開
-					var spawn_x = clampf(target_pos_x + offset_x, PLAYER_BASE_X, 640.0)
+					# ★どこにドロップしても必ず自陣拠点付近から出現する★
+					# target_pos_x（ドロップ場所）は無視し、PLAYER_BASE_Xを基準にする
+					var spawn_x = PLAYER_BASE_X + 30.0 + offset_x
 					var unit = spawn_unit(BaseUnit.Team.PLAYER, spawn_x, card.get_unit_stats(), true)
 					unit.enemy_base_x = ENEMY_BASE_X
 					
